@@ -1,0 +1,419 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.LendaSwap.Plugins.Swap
+@using BTCPayServer.LendaSwap.Plugins.Swap.ViewModels
+@model CreateSwapViewModel
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    Layout = "_Layout";
+    ViewData.SetLayoutModel(new LayoutModel(nameof(LendaSwapNavPages.Send), "Send")
+        { ActiveCategory = nameof(LendaSwapNavPages) });
+
+    var hasLightning = ViewData["HasLightning"] as bool? ?? false;
+    var hasOnchain = ViewData["HasOnchain"] as bool? ?? false;
+    var hasOnchainHot = ViewData["HasOnchainHotWallet"] as bool? ?? false;
+    var hasAnyWallet = hasLightning || hasOnchain;
+}
+
+<form method="post" asp-action="SendCreate" asp-controller="UILendaSwap" asp-route-storeId="@storeId" id="sendForm">
+    <div class="sticky-header d-flex align-items-center justify-content-between">
+        <h2>@ViewData["Title"]</h2>
+        <button type="button" class="btn btn-primary" id="submitBtn" disabled>Send</button>
+    </div>
+
+    <partial name="_StatusMessage" />
+
+    @if (!hasAnyWallet)
+    {
+        <div class="row">
+            <div class="col-xl-8 col-xxl-constrain">
+                <div class="alert alert-danger mb-3">
+                    <h5 class="alert-heading mb-2">No wallet configured</h5>
+                    <p class="mb-0">
+                        Configure a <strong>Lightning node</strong> or an <strong>onchain wallet</strong>
+                        in your store's wallet settings to create swaps.
+                    </p>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="row">
+        <div class="col-xl-8 col-xxl-constrain">
+
+            <div class="bg-tile rounded p-4 mb-4">
+                <h4 class="mb-3">I want to send</h4>
+
+                <div class="d-flex flex-column gap-2 mb-4" id="sourceOptions">
+                    @foreach (var pair in Model.AvailablePairs)
+                    {
+                        var sourceId = pair.Source?.TokenId;
+                        var targetId = pair.Target?.TokenId;
+                        var sourceLabel = sourceId switch
+                        {
+                            "btc_lightning" => "BTC (Lightning)",
+                            "btc_onchain" => "BTC (Onchain)",
+                            "btc_arkade" => "BTC (Arkade)",
+                            _ => pair.Source?.Symbol + " (" + pair.Source?.Name + ")"
+                        };
+                        var targetLabel = targetId switch
+                        {
+                            "usdc_pol" => "USDC (Polygon)",
+                            "btc_arkade" => "BTC (Arkade)",
+                            _ => pair.Target?.Symbol + " (" + pair.Target?.Name + ")"
+                        };
+                        var walletAvailable = sourceId switch
+                        {
+                            "btc_lightning" => hasLightning,
+                            "btc_onchain" => hasOnchain,
+                            _ => false
+                        };
+                        var isHotWallet = sourceId switch
+                        {
+                            "btc_lightning" => hasLightning,
+                            "btc_onchain" => hasOnchainHot,
+                            _ => false
+                        };
+                        var isChecked = sourceId == Model.SourceToken;
+                        var isDisabled = !walletAvailable;
+                        <label class="d-flex align-items-center gap-3 p-3 rounded border @(isDisabled ? "opacity-50" : isChecked ? "border-primary bg-primary bg-opacity-10" : "")"
+                               style="cursor: @(isDisabled ? "not-allowed" : "pointer");" data-source="@sourceId" data-target="@targetId"
+                               data-wallet-available="@walletAvailable.ToString().ToLowerInvariant()">
+                            <input type="radio" name="sourceChoice" value="@sourceId"
+                                   class="form-check-input mt-0" @(isChecked && !isDisabled ? "checked" : "")
+                                   data-target="@targetId"
+                                   @(isDisabled ? "disabled" : "") />
+                            <div class="flex-grow-1">
+                                <span class="fw-semibold">@sourceLabel</span>
+                                <span class="text-secondary mx-1">-></span>
+                                <span class="fw-semibold">@targetLabel</span>
+                            </div>
+                            @if (isHotWallet)
+                            {
+                                <span class="badge bg-success">Auto-pay</span>
+                            }
+                            else if (walletAvailable)
+                            {
+                                <span class="badge bg-warning text-dark">Manual pay</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-danger">Not configured</span>
+                            }
+                        </label>
+                    }
+                </div>
+
+                <input type="hidden" asp-for="SourceToken" id="sourceToken" />
+                <input type="hidden" asp-for="TargetToken" id="targetToken" />
+
+                <div class="form-group mb-3">
+                    <label asp-for="AmountSats" class="form-label">Amount</label>
+                    <div class="input-group">
+                        <input asp-for="AmountSats" class="form-control" inputmode="numeric" placeholder="0" id="amountSats" />
+                        <span class="input-group-text">sats</span>
+                    </div>
+                    <span asp-validation-for="AmountSats" class="text-danger"></span>
+                    <div id="quoteMinMax" class="text-secondary small mt-1" style="display:none;"></div>
+                </div>
+
+                <!-- Quote info -->
+                <div id="quoteInfo" class="text-secondary small mb-3" style="display:none;">
+                    <span id="quoteReceive" class="fw-semibold"></span>
+                    <span class="mx-1">&middot;</span>
+                    <span id="quoteFee"></span>
+                </div>
+                <div id="quoteError" class="text-danger small mb-3" style="display:none;"></div>
+                <div id="quoteLoading" class="text-secondary small mb-3" style="display:none;">
+                    Fetching quote...
+                </div>
+            </div>
+
+            <div class="bg-tile rounded p-4 mb-4" id="destinationSection">
+                <h4 class="mb-3" id="destinationTitle">Receive USDC</h4>
+                <div class="form-group">
+                    <label asp-for="ClaimDestination" class="form-label" id="destinationLabel">Destination Address</label>
+                    <input asp-for="ClaimDestination" class="form-control" id="claimDestination" placeholder="0x..." />
+                    <span asp-validation-for="ClaimDestination" class="text-danger"></span>
+                    <div class="text-secondary mt-1 small" id="destinationHint">Polygon address (0x...) where you will receive USDC.</div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</form>
+
+<!-- Confirmation Modal -->
+<div class="modal fade" id="confirmModal" tabindex="-1" aria-labelledby="confirmModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="confirmModalLabel">Confirm Swap</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">You send</dt>
+                    <dd class="col-sm-8" id="confirmSend">—</dd>
+
+                    <dt class="col-sm-4">You receive</dt>
+                    <dd class="col-sm-8" id="confirmReceive">—</dd>
+
+                    <dt class="col-sm-4">Fees</dt>
+                    <dd class="col-sm-8" id="confirmFees">—</dd>
+
+                    <dt class="col-sm-4">Destination</dt>
+                    <dd class="col-sm-8 text-break" id="confirmDest">—</dd>
+                </dl>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmSendBtn">Confirm &amp; Send</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var pairsJson = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.AvailablePairs));
+    var pairs = pairsJson || [];
+
+    var walletStatus = {
+        'btc_lightning': @(hasLightning ? "true" : "false"),
+        'btc_onchain': @(hasOnchain ? "true" : "false"),
+        'btc_onchain_hot': @(hasOnchainHot ? "true" : "false")
+    };
+
+    var defaultAddresses = {
+        'usdc_pol': '@Html.Raw(ViewData["DefaultPolygonAddress"])',
+        'btc_arkade': '@Html.Raw(ViewData["DefaultArkadeAddress"])'
+    };
+
+    var sourceInput = document.getElementById('sourceToken');
+    var targetInput = document.getElementById('targetToken');
+    var amountInput = document.getElementById('amountSats');
+    var submitBtn = document.getElementById('submitBtn');
+    var quoteInfo = document.getElementById('quoteInfo');
+    var quoteReceive = document.getElementById('quoteReceive');
+    var quoteFee = document.getElementById('quoteFee');
+    var quoteError = document.getElementById('quoteError');
+    var quoteLoading = document.getElementById('quoteLoading');
+    var quoteMinMax = document.getElementById('quoteMinMax');
+    var radios = document.querySelectorAll('input[name="sourceChoice"]');
+    var destinationTitle = document.getElementById('destinationTitle');
+    var destinationLabel = document.getElementById('destinationLabel');
+    var destinationHint = document.getElementById('destinationHint');
+    var claimDestination = document.getElementById('claimDestination');
+    var sendForm = document.getElementById('sendForm');
+
+    // Confirmation modal elements
+    var confirmModal = new bootstrap.Modal(document.getElementById('confirmModal'));
+    var confirmSend = document.getElementById('confirmSend');
+    var confirmReceive = document.getElementById('confirmReceive');
+    var confirmFees = document.getElementById('confirmFees');
+    var confirmDest = document.getElementById('confirmDest');
+    var confirmSendBtn = document.getElementById('confirmSendBtn');
+
+    // Store last quote data for the modal
+    var lastQuoteData = null;
+
+    sourceInput.value = '@Model.SourceToken';
+    targetInput.value = '@Model.TargetToken';
+
+    function updateSubmitButton() {
+        var source = sourceInput.value;
+        var available = walletStatus[source] || false;
+        submitBtn.disabled = !available;
+    }
+
+    var currentTarget = targetInput.value;
+
+    function updateDestinationUI(targetToken) {
+        if (targetToken === 'btc_arkade') {
+            destinationTitle.textContent = 'Receive BTC (Arkade)';
+            destinationLabel.textContent = 'Arkade Destination Address';
+            destinationHint.textContent = 'Arkade address where you will receive BTC.';
+            claimDestination.placeholder = 'ark1...';
+        } else {
+            destinationTitle.textContent = 'Receive USDC';
+            destinationLabel.textContent = 'USDC Destination Address (Polygon)';
+            destinationHint.textContent = 'Polygon address (0x...) where you will receive USDC.';
+            claimDestination.placeholder = '0x...';
+        }
+    }
+
+    function updateSelection(sourceToken, targetToken) {
+        sourceInput.value = sourceToken;
+        targetInput.value = targetToken;
+
+        document.querySelectorAll('#sourceOptions label').forEach(function (label) {
+            var isSelected = label.dataset.source === sourceToken;
+            var isAvailable = label.dataset.walletAvailable === 'true';
+            if (isSelected && isAvailable) {
+                label.classList.add('border-primary', 'bg-primary', 'bg-opacity-10');
+            } else {
+                label.classList.remove('border-primary', 'bg-primary', 'bg-opacity-10');
+            }
+        });
+
+        updateSubmitButton();
+        updateDestinationUI(targetToken);
+
+        // Restore default address from settings when target type changes
+        if (targetToken !== currentTarget) {
+            claimDestination.value = defaultAddresses[targetToken] || '';
+            currentTarget = targetToken;
+        }
+
+        debouncedFetchQuote();
+    }
+
+    radios.forEach(function (radio) {
+        radio.addEventListener('change', function () {
+            updateSelection(this.value, this.dataset.target);
+        });
+    });
+
+    // Initialize: use the default selection
+    var initialChecked = document.querySelector('input[name="sourceChoice"]:checked');
+    if (initialChecked) {
+        updateSelection(initialChecked.value, initialChecked.dataset.target);
+    } else {
+        updateSubmitButton();
+        updateDestinationUI(targetInput.value);
+    }
+
+    function getTargetInfo(targetTokenId) {
+        for (var i = 0; i < pairs.length; i++) {
+            if (pairs[i].target && pairs[i].target.token_id === targetTokenId) {
+                return pairs[i].target;
+            }
+        }
+        return null;
+    }
+
+    var quoteTimeout = null;
+    function fetchQuote() {
+        var from = sourceInput.value;
+        var to = targetInput.value;
+        var amount = parseInt(amountInput.value, 10);
+
+        quoteInfo.style.display = 'none';
+        quoteError.style.display = 'none';
+        quoteLoading.style.display = 'none';
+        lastQuoteData = null;
+
+        if (!from || !to || !amount || amount <= 0) return;
+
+        quoteLoading.style.display = '';
+
+        var url = '@Url.Action("GetQuoteApi", "UILendaSwap", new { storeId = "__STOREID__" })'.replace('__STOREID__', '@storeId');
+        url += (url.indexOf('?') >= 0 ? '&' : '?') + 'from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to) + '&amount=' + amount;
+
+        fetch(url, { credentials: 'same-origin' })
+            .then(function (r) {
+                if (!r.ok) return r.json().then(function (d) { throw new Error(d.error || 'Quote failed'); });
+                return r.json();
+            })
+            .then(function (data) {
+                quoteLoading.style.display = 'none';
+                quoteInfo.style.display = '';
+                lastQuoteData = data;
+
+                // Min/max enforcement
+                if (data.minAmount || data.maxAmount) {
+                    amountInput.min = data.minAmount || '';
+                    amountInput.max = data.maxAmount || '';
+                    quoteMinMax.style.display = '';
+                    quoteMinMax.textContent = 'Min: ' + (data.minAmount || 0).toLocaleString() + ' \u00b7 Max: ' + (data.maxAmount || 0).toLocaleString() + ' sats';
+                }
+
+                var rate = parseFloat(data.exchangeRate);
+                if (!isNaN(rate) && rate > 0) {
+                    var satsAmount = parseInt(amountInput.value, 10);
+                    var totalFeeSats = (data.protocolFee || 0) + (data.networkFee || 0);
+                    var netSats = satsAmount - totalFeeSats;
+                    if (netSats < 0) netSats = 0;
+
+                    var targetInfo = getTargetInfo(targetInput.value);
+                    if (targetInfo && targetInfo.symbol === 'USDC') {
+                        var receiveVal = (netSats / 100000000) * rate;
+                        quoteReceive.textContent = 'You receive: \u2248 $' + receiveVal.toFixed(2) + ' USDC';
+                    } else {
+                        quoteReceive.textContent = 'You receive: \u2248 ' + netSats.toLocaleString() + ' sats';
+                    }
+                    quoteFee.textContent = 'Fee: ' + totalFeeSats.toLocaleString() + ' sats';
+                } else {
+                    quoteReceive.textContent = '';
+                    quoteFee.textContent = '';
+                }
+            })
+            .catch(function (err) {
+                quoteLoading.style.display = 'none';
+                quoteError.style.display = '';
+                quoteError.textContent = err.message || 'Failed to fetch quote';
+            });
+    }
+
+    function debouncedFetchQuote() {
+        if (quoteTimeout) clearTimeout(quoteTimeout);
+        quoteTimeout = setTimeout(fetchQuote, 400);
+    }
+
+    amountInput.addEventListener('input', debouncedFetchQuote);
+
+    if (amountInput.value && parseInt(amountInput.value, 10) > 0) {
+        fetchQuote();
+    }
+
+    // Confirmation modal flow
+    submitBtn.addEventListener('click', function () {
+        var amount = parseInt(amountInput.value, 10);
+        if (!amount || amount <= 0) {
+            amountInput.focus();
+            return;
+        }
+        if (!claimDestination.value) {
+            claimDestination.focus();
+            return;
+        }
+
+        // Check min/max
+        if (amountInput.min && amount < parseInt(amountInput.min, 10)) {
+            quoteError.style.display = '';
+            quoteError.textContent = 'Amount is below the minimum of ' + parseInt(amountInput.min, 10).toLocaleString() + ' sats.';
+            amountInput.focus();
+            return;
+        }
+        if (amountInput.max && amount > parseInt(amountInput.max, 10)) {
+            quoteError.style.display = '';
+            quoteError.textContent = 'Amount exceeds the maximum of ' + parseInt(amountInput.max, 10).toLocaleString() + ' sats.';
+            amountInput.focus();
+            return;
+        }
+
+        // Populate confirmation modal
+        var totalFees = lastQuoteData ? ((lastQuoteData.protocolFee || 0) + (lastQuoteData.networkFee || 0)) : 0;
+        confirmSend.textContent = amount.toLocaleString() + ' sats';
+        confirmFees.textContent = totalFees.toLocaleString() + ' sats';
+        confirmReceive.textContent = quoteReceive.textContent ? quoteReceive.textContent.replace('You receive: ', '') : '\u2014';
+        confirmDest.textContent = claimDestination.value;
+
+        confirmModal.show();
+    });
+
+    // Submit form from confirmation modal
+    confirmSendBtn.addEventListener('click', function () {
+        confirmModal.hide();
+
+        // Loading state on submit button
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Creating swap...';
+
+        sendForm.submit();
+    });
+})();
+</script>

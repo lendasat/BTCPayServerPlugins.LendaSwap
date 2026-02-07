@@ -1,0 +1,424 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.Components.QRCode
+@using BTCPayServer.LendaSwap.Plugins.Swap
+@using BTCPayServer.LendaSwap.Plugins.Swap.Data
+@model SwapRecord
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    Layout = "_Layout";
+    ViewData.SetLayoutModel(new LayoutModel(nameof(LendaSwapNavPages.Swaps), "Swap Details")
+        { ActiveCategory = nameof(LendaSwapNavPages) });
+
+    var badgeClass = Model.Status switch
+    {
+        SwapStatus.Completed => "bg-success",
+        SwapStatus.Failed => "bg-danger",
+        SwapStatus.Expired => "bg-secondary",
+        SwapStatus.Claiming => "bg-primary",
+        SwapStatus.PendingClaim => "bg-primary",
+        SwapStatus.PayingFromWallet => "bg-info",
+        SwapStatus.PendingPayment => "bg-warning text-dark",
+        _ => "bg-light text-dark"
+    };
+
+    var preimage = ViewData["Preimage"] as string;
+    var isArkadeSwap = Model.SwapType == SwapType.BitcoinToArkade;
+    var isLightningSwap = Model.SwapType == SwapType.LightningToUsdc;
+    var needsClaim = Model.Status is SwapStatus.PendingClaim or SwapStatus.Claiming;
+    var isFailed = Model.Status == SwapStatus.Failed;
+    var isTerminal = Model.Status is SwapStatus.Completed or SwapStatus.Failed or SwapStatus.Expired;
+    var needsManualPay = Model.Status == SwapStatus.PendingPayment && !string.IsNullOrEmpty(Model.PaymentAddress);
+    var qrData = needsManualPay
+        ? (isLightningSwap
+            ? Model.PaymentAddress.ToUpper()
+            : $"bitcoin:{Model.PaymentAddress}?amount={((decimal)Model.AmountSats / 100_000_000m).ToString("0.########")}")
+        : null;
+}
+
+<div class="sticky-header d-flex align-items-center justify-content-between">
+    <h2>@ViewData["Title"]</h2>
+    <a asp-action="SwapList" asp-controller="UILendaSwap" asp-route-storeId="@storeId" class="btn btn-secondary">
+        Back to Swaps
+    </a>
+</div>
+
+<partial name="_StatusMessage" />
+
+<div class="row">
+    <div class="col-xl-10 col-xxl-constrain">
+
+        <div class="d-flex align-items-center gap-3 mb-4">
+            <span class="badge @badgeClass fs-6">@Model.Status</span>
+            @if (isLightningSwap)
+            {
+                <span class="badge bg-primary fs-6">Lightning -> USDC</span>
+            }
+            else
+            {
+                <span class="badge bg-info fs-6">Bitcoin -> Arkade</span>
+            }
+        </div>
+
+        <!-- PAYING FROM WALLET: onchain tx in progress -->
+        @if (Model.Status == SwapStatus.PayingFromWallet)
+        {
+            <div class="alert alert-info">
+                <h5 class="alert-heading mb-2">Payment Sent from Wallet</h5>
+                <p class="mb-1">
+                    An onchain transaction has been broadcast from your store's hot wallet.
+                    Waiting for confirmations before the swap can proceed.
+                </p>
+                @if (!string.IsNullOrEmpty(Model.TxId))
+                {
+                    <div class="mt-2">
+                        <strong>Transaction ID:</strong><br />
+                        <div class="d-flex align-items-center gap-2 mt-1">
+                            <code class="text-break user-select-all">@Model.TxId</code>
+                            <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.TxId" title="Copy">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+        <!-- ACTION REQUIRED: Arkade claiming -->
+        @if (isArkadeSwap && needsClaim && !string.IsNullOrEmpty(preimage))
+        {
+            <div class="alert alert-warning">
+                <h5 class="alert-heading mb-2">Action Required: Claim your Arkade VHTLC</h5>
+                <p class="mb-2">
+                    The server has funded the Arkade VHTLC. You must claim it using your Arkade wallet
+                    by revealing the preimage (secret) below. <strong>If you do not claim before the timelock expires,
+                    the server will reclaim the funds.</strong>
+                </p>
+                @if (!string.IsNullOrEmpty(Model.TargetHtlcAddress))
+                {
+                    <div class="mb-2">
+                        <strong>Arkade VHTLC Address:</strong><br />
+                        <div class="d-flex align-items-center gap-2 mt-1">
+                            <code class="text-break user-select-all">@Model.TargetHtlcAddress</code>
+                            <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.TargetHtlcAddress" title="Copy">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                }
+                <div class="mb-2">
+                    <strong>Preimage (Secret):</strong><br />
+                    <div class="d-flex align-items-center gap-2 mt-1">
+                        <code class="text-break user-select-all">@preimage</code>
+                        <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@preimage" title="Copy">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        </button>
+                    </div>
+                </div>
+                @if (Model.HtlcExpiryBlock.HasValue)
+                {
+                    <div>
+                        <strong>BTC Refund Locktime:</strong> @Model.HtlcExpiryBlock.Value
+                        <span class="text-secondary">(your claim must complete before this time)</span>
+                    </div>
+                }
+            </div>
+        }
+
+        <!-- ACTION REQUIRED: Lightning/EVM retry claim -->
+        @if (isLightningSwap && needsClaim)
+        {
+            <div class="alert alert-info">
+                <h5 class="alert-heading mb-2">Claiming via Gelato</h5>
+                <p class="mb-2">
+                    The USDC claim is being processed via Gelato (gasless relay).
+                    @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+                    {
+                        <span class="text-danger">The last claim attempt failed. You can retry below.</span>
+                    }
+                    else
+                    {
+                        <span>If this takes too long, you can retry the claim.</span>
+                    }
+                </p>
+                <form method="post" asp-action="RetryClaim" asp-controller="UILendaSwap"
+                      asp-route-storeId="@storeId" asp-route-swapId="@Model.Id" class="d-inline">
+                    <button type="submit" class="btn btn-primary btn-sm">Retry Gelato Claim</button>
+                </form>
+                @if (Model.HtlcExpiryBlock.HasValue)
+                {
+                    <div class="mt-2 text-secondary small">
+                        EVM HTLC refund locktime: @Model.HtlcExpiryBlock.Value — claim must complete before this.
+                    </div>
+                }
+            </div>
+        }
+
+        <!-- REFUND INFO for failed/expired swaps -->
+        @if (isFailed && Model.Status == SwapStatus.Failed)
+        {
+            <div class="alert alert-danger">
+                <h5 class="alert-heading mb-2">Swap Failed</h5>
+                <p class="mb-1"><strong>Error:</strong> @Model.ErrorMessage</p>
+                @if (Model.HtlcExpiryBlock.HasValue)
+                {
+                    <p class="mb-0 mt-2">
+                        If you already funded this swap, the HTLC will automatically refund after the timelock
+                        expires (locktime: @Model.HtlcExpiryBlock.Value). No action is needed — the LendaSwap
+                        server handles refunds automatically.
+                    </p>
+                }
+                else
+                {
+                    <p class="mb-0 mt-2">
+                        If the swap failed before you sent any funds, no action is needed.
+                        If you did send funds, they will be automatically refunded after the HTLC timelock expires.
+                    </p>
+                }
+            </div>
+        }
+
+        @if (Model.Status == SwapStatus.Expired)
+        {
+            <div class="alert alert-secondary">
+                <h5 class="alert-heading mb-2">Swap Expired</h5>
+                <p class="mb-0">
+                    This swap expired before it was funded. No funds were locked — no action needed.
+                </p>
+            </div>
+        }
+
+        <!-- Swap Information -->
+        <div class="bg-tile rounded p-3 mb-4">
+            <h4 class="mb-3">Swap Information</h4>
+            <dl class="row mb-0">
+                <dt class="col-sm-4">Swap ID</dt>
+                <dd class="col-sm-8">
+                    <div class="d-flex align-items-center gap-2">
+                        <code>@Model.Id</code>
+                        <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.Id" title="Copy">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        </button>
+                    </div>
+                </dd>
+
+                <dt class="col-sm-4">LendaSwap ID</dt>
+                <dd class="col-sm-8">
+                    @if (!string.IsNullOrEmpty(Model.LendaSwapId))
+                    {
+                        <div class="d-flex align-items-center gap-2">
+                            <code>@Model.LendaSwapId</code>
+                            <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.LendaSwapId" title="Copy">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </div>
+                    }
+                    else
+                    {
+                        <code>—</code>
+                    }
+                </dd>
+
+                <dt class="col-sm-4">Amount</dt>
+                <dd class="col-sm-8">@Model.AmountSats.ToString("N0") sats</dd>
+
+                <dt class="col-sm-4">Destination</dt>
+                <dd class="col-sm-8">
+                    <div class="d-flex align-items-center gap-2">
+                        <code>@Model.ClaimDestination</code>
+                        <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.ClaimDestination" title="Copy">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        </button>
+                    </div>
+                </dd>
+
+                <dt class="col-sm-4">Created</dt>
+                <dd class="col-sm-8">@Model.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss UTC")</dd>
+
+                <dt class="col-sm-4">Updated</dt>
+                <dd class="col-sm-8">@Model.UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss UTC")</dd>
+
+                @if (!string.IsNullOrEmpty(Model.TxId))
+                {
+                    <dt class="col-sm-4">Transaction ID</dt>
+                    <dd class="col-sm-8">
+                        <div class="d-flex align-items-center gap-2">
+                            <code class="text-break">@Model.TxId</code>
+                            <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.TxId" title="Copy">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </div>
+                    </dd>
+                }
+
+                @if (Model.CompletedAt.HasValue)
+                {
+                    <dt class="col-sm-4">Completed</dt>
+                    <dd class="col-sm-8">@Model.CompletedAt.Value.ToString("yyyy-MM-dd HH:mm:ss UTC")</dd>
+                }
+            </dl>
+        </div>
+
+        <!-- Payment Information -->
+        @if (!string.IsNullOrEmpty(Model.PaymentAddress))
+        {
+            <div class="bg-tile rounded p-3 mb-4">
+                <h4 class="mb-3">Payment Information</h4>
+                @if (isLightningSwap)
+                {
+                    <p class="text-secondary">Pay this Lightning invoice to fund the swap:</p>
+                }
+                else
+                {
+                    <p class="text-secondary">Send <strong>@Model.AmountSats.ToString("N0") sats</strong> to this address to fund the swap:</p>
+                }
+                @if (qrData != null)
+                {
+                    <div class="text-center my-3">
+                        <vc:qr-code data="@qrData" />
+                    </div>
+                }
+                <div class="form-group">
+                    @if (isLightningSwap)
+                    {
+                        <div class="input-group">
+                            <textarea class="form-control user-select-all" rows="4" readonly>@Model.PaymentAddress</textarea>
+                            <button type="button" class="btn btn-outline-secondary clipboard-btn" data-clipboard-text="@Model.PaymentAddress" title="Copy">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="input-group">
+                            <input type="text" class="form-control user-select-all" value="@Model.PaymentAddress" readonly />
+                            <button type="button" class="btn btn-outline-secondary clipboard-btn" data-clipboard-text="@Model.PaymentAddress" title="Copy">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Gelato Claim Status -->
+        @if (!string.IsNullOrEmpty(Model.GelatoTaskId))
+        {
+            <div class="bg-tile rounded p-3 mb-4">
+                <h4 class="mb-3">Claim Status</h4>
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">Gelato Task ID</dt>
+                    <dd class="col-sm-8">
+                        <div class="d-flex align-items-center gap-2">
+                            <code>@Model.GelatoTaskId</code>
+                            <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.GelatoTaskId" title="Copy">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </div>
+                    </dd>
+                </dl>
+            </div>
+        }
+
+        <!-- Error display (for non-failed statuses with errors, e.g. claim retry errors) -->
+        @if (!string.IsNullOrEmpty(Model.ErrorMessage) && Model.Status != SwapStatus.Failed)
+        {
+            <div class="alert alert-danger">
+                <strong>Error:</strong> @Model.ErrorMessage
+            </div>
+        }
+
+        <!-- Technical Details -->
+        <div class="bg-tile rounded p-3 mb-4">
+            <h4 class="mb-3">Technical Details</h4>
+            <dl class="row mb-0">
+                <dt class="col-sm-4">Payment Hash</dt>
+                <dd class="col-sm-8">
+                    @if (!string.IsNullOrEmpty(Model.PaymentHash))
+                    {
+                        <div class="d-flex align-items-center gap-2">
+                            <code class="text-break">@Model.PaymentHash</code>
+                            <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.PaymentHash" title="Copy">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </div>
+                    }
+                    else
+                    {
+                        <code>—</code>
+                    }
+                </dd>
+
+                @if (!string.IsNullOrEmpty(Model.TargetHtlcAddress))
+                {
+                    <dt class="col-sm-4">Target HTLC Address</dt>
+                    <dd class="col-sm-8">
+                        <div class="d-flex align-items-center gap-2">
+                            <code class="text-break">@Model.TargetHtlcAddress</code>
+                            <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.TargetHtlcAddress" title="Copy">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </div>
+                    </dd>
+                }
+
+                @if (Model.HtlcExpiryBlock.HasValue)
+                {
+                    <dt class="col-sm-4">HTLC Refund Locktime</dt>
+                    <dd class="col-sm-8">@Model.HtlcExpiryBlock.Value</dd>
+                }
+            </dl>
+        </div>
+
+        <!-- Emergency Recovery: Preimage -->
+        @if (!string.IsNullOrEmpty(preimage))
+        {
+            <details class="bg-tile rounded p-3">
+                <summary class="fw-semibold" style="cursor: pointer;">Emergency Recovery — Preimage</summary>
+                <div class="mt-3">
+                    <p class="text-secondary small">
+                        This is the secret preimage for this swap's HTLC. You can use it to manually claim
+                        funds from the HTLC contract if automatic claiming fails. Keep this secret safe —
+                        anyone with this value can claim the locked funds.
+                    </p>
+                    <div class="form-group">
+                        <label class="form-label">Preimage (hex)</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control font-monospace user-select-all" value="@preimage" readonly />
+                            <button type="button" class="btn btn-outline-secondary clipboard-btn" data-clipboard-text="@preimage" title="Copy">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </details>
+        }
+
+    </div>
+</div>
+
+@if (!isTerminal)
+{
+    <!-- Auto-refresh every 15 seconds for active swaps -->
+    <script>
+        setTimeout(function() { location.reload(); }, 15000);
+    </script>
+}
+
+<script>
+(function () {
+    document.querySelectorAll('.clipboard-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var text = this.getAttribute('data-clipboard-text');
+            if (!text) return;
+            navigator.clipboard.writeText(text).then(function () {
+                var original = btn.innerHTML;
+                btn.innerHTML = '<span class="small">Copied!</span>';
+                setTimeout(function () { btn.innerHTML = original; }, 1500);
+            });
+        });
+    });
+})();
+</script>

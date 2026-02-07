@@ -1,0 +1,133 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.LendaSwap.Plugins.Swap
+@using BTCPayServer.LendaSwap.Plugins.Swap.Data
+@using BTCPayServer.LendaSwap.Plugins.Swap.ViewModels
+@model SwapListViewModel
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    Layout = "_Layout";
+    ViewData.SetLayoutModel(new LayoutModel(nameof(LendaSwapNavPages.Swaps), "LendaSwap")
+        { ActiveCategory = nameof(LendaSwapNavPages) });
+}
+
+<div class="sticky-header d-flex align-items-center justify-content-between">
+    <h2>@ViewData["Title"]</h2>
+    <a asp-action="Send" asp-controller="UILendaSwap" asp-route-storeId="@storeId" class="btn btn-primary">
+        New Swap
+    </a>
+</div>
+
+<partial name="_StatusMessage" />
+
+<div class="row mb-3">
+    <div class="col-auto">
+        <form method="get" asp-action="SwapList" asp-controller="UILendaSwap" class="d-flex gap-2">
+            <select name="statusFilter" class="form-select" style="width: auto;">
+                <option value="">All Statuses</option>
+                @foreach (var status in Enum.GetValues<SwapStatus>())
+                {
+                    <option value="@status" selected="@(Model.StatusFilter == status)">@status</option>
+                }
+            </select>
+            <button type="submit" class="btn btn-secondary">Filter</button>
+        </form>
+    </div>
+</div>
+
+@if (Model.Swaps.Any())
+{
+    <div class="table-responsive">
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>Created</th>
+                    <th>Type</th>
+                    <th>Amount (sats)</th>
+                    <th>Status</th>
+                    <th>Destination</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var swap in Model.Swaps)
+                {
+                    <tr>
+                        <td>@swap.CreatedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                        <td>
+                            @{
+                                var sourceLabel = swap.SourceToken switch
+                                {
+                                    "btc_lightning" => "BTC (LN)",
+                                    "btc_onchain" => "BTC",
+                                    _ => swap.SourceToken ?? "?"
+                                };
+                                var targetLabel = swap.TargetToken switch
+                                {
+                                    "usdc_pol" => "USDC",
+                                    "btc_arkade" => "BTC (Ark)",
+                                    _ => swap.TargetToken ?? "?"
+                                };
+                                var typeBadge = swap.SwapType == SwapType.LightningToUsdc
+                                    ? "bg-primary"
+                                    : "bg-info";
+                            }
+                            <span class="badge @typeBadge">@sourceLabel -> @targetLabel</span>
+                        </td>
+                        <td>@swap.AmountSats.ToString("N0")</td>
+                        <td>
+                            @{
+                                var badgeClass = swap.Status switch
+                                {
+                                    SwapStatus.Completed => "bg-success",
+                                    SwapStatus.Failed => "bg-danger",
+                                    SwapStatus.Expired => "bg-secondary",
+                                    SwapStatus.Claiming => "bg-primary",
+                                    SwapStatus.PendingClaim => "bg-primary",
+                                    SwapStatus.PayingFromWallet => "bg-info",
+                                    SwapStatus.PendingPayment => "bg-warning text-dark",
+                                    _ => "bg-light text-dark"
+                                };
+                            }
+                            <span class="badge @badgeClass">@swap.Status</span>
+                        </td>
+                        <td>
+                            <span class="text-truncate d-inline-block" style="max-width: 200px;" title="@swap.ClaimDestination">
+                                @swap.ClaimDestination
+                            </span>
+                        </td>
+                        <td class="text-end">
+                            <a asp-action="SwapDetail" asp-controller="UILendaSwap"
+                               asp-route-storeId="@storeId" asp-route-swapId="@swap.Id"
+                               class="btn btn-link">
+                                Details
+                            </a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (Model.TotalPages > 1)
+    {
+        <nav>
+            <ul class="pagination">
+                @for (var i = 1; i <= Model.TotalPages; i++)
+                {
+                    <li class="page-item @(i == Model.CurrentPage ? "active" : "")">
+                        <a class="page-link" asp-action="SwapList" asp-controller="UILendaSwap"
+                           asp-route-storeId="@storeId" asp-route-page="@i"
+                           asp-route-statusFilter="@Model.StatusFilter">@i</a>
+                    </li>
+                }
+            </ul>
+        </nav>
+    }
+}
+else
+{
+    <p class="text-secondary mt-3">No swaps found. Create your first swap to get started.</p>
+}
