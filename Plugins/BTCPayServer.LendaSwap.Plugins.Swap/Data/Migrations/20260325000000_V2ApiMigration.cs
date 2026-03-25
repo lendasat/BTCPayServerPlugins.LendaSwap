@@ -18,7 +18,8 @@ namespace BTCPayServer.LendaSwap.Plugins.Swap.Data.Migrations
                     ADD COLUMN IF NOT EXISTS ""SourceChain"" character varying(32),
                     ADD COLUMN IF NOT EXISTS ""TargetChain"" character varying(32),
                     ADD COLUMN IF NOT EXISTS ""EvmHtlcAddress"" character varying(512),
-                    ADD COLUMN IF NOT EXISTS ""SourceAmountRaw"" character varying(128);
+                    ADD COLUMN IF NOT EXISTS ""SourceAmountRaw"" character varying(128),
+                    ADD COLUMN IF NOT EXISTS ""TxId"" character varying(128);
 
                 -- Rename GelatoTaskId → GaslessTxHash if the old column still exists
                 DO $$ BEGIN
