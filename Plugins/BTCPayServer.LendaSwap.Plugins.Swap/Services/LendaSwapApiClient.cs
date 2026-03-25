@@ -122,28 +122,24 @@ public class LendaSwapApiClient(HttpClient httpClient)
         var response = await httpClient.GetAsync("/tokens", ct);
         await EnsureSuccess(response, ct);
         var json = await response.Content.ReadAsStringAsync(ct);
-
-        // API returns a flat array of TokenInfo. Split into btc/evm categories.
-        var allTokens = JsonConvert.DeserializeObject<List<TokenInfo>>(json) ?? new List<TokenInfo>();
-        var btcChains = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Lightning", "Bitcoin", "Arkade" };
-        return new TokenInfosResponse
-        {
-            BtcTokens = allTokens.Where(t => btcChains.Contains(t.Chain ?? "")).ToList(),
-            EvmTokens = allTokens.Where(t => !btcChains.Contains(t.Chain ?? "")).ToList()
-        };
+        return JsonConvert.DeserializeObject<TokenInfosResponse>(json) ?? new TokenInfosResponse();
     }
 
     // --- Quote ---
 
-    /// <summary>
-    /// Gets a quote. Uses the actual production API format: from/to (token_ids) + base_amount.
-    /// </summary>
     public async Task<QuoteResponse> GetQuote(
-        string fromTokenId, string toTokenId, long baseAmount, CancellationToken ct = default)
+        string sourceChain, string sourceToken, string targetChain, string targetToken,
+        long? sourceAmount = null, long? targetAmount = null, CancellationToken ct = default)
     {
-        var url = $"/quote?from={Uri.EscapeDataString(fromTokenId)}" +
-                  $"&to={Uri.EscapeDataString(toTokenId)}" +
-                  $"&base_amount={baseAmount}";
+        var url = $"/quote?source_chain={Uri.EscapeDataString(sourceChain)}" +
+                  $"&source_token={Uri.EscapeDataString(sourceToken)}" +
+                  $"&target_chain={Uri.EscapeDataString(targetChain)}" +
+                  $"&target_token={Uri.EscapeDataString(targetToken)}";
+
+        if (sourceAmount.HasValue)
+            url += $"&source_amount={sourceAmount.Value}";
+        else if (targetAmount.HasValue)
+            url += $"&target_amount={targetAmount.Value}";
 
         var response = await httpClient.GetAsync(url, ct);
         await EnsureSuccess(response, ct);

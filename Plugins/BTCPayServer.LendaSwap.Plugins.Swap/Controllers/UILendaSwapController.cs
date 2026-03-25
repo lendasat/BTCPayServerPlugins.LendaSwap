@@ -321,22 +321,27 @@ public class UILendaSwapController(
 
     [HttpGet("api/quote")]
     public async Task<IActionResult> GetQuoteApi(
-        string storeId, string from, string to, long amount)
+        string storeId, string sourceChain, string sourceToken,
+        string targetChain, string targetToken, long amount)
     {
-        if (string.IsNullOrEmpty(from) || string.IsNullOrEmpty(to) || amount <= 0)
+        if (string.IsNullOrEmpty(sourceChain) || string.IsNullOrEmpty(sourceToken) ||
+            string.IsNullOrEmpty(targetChain) || string.IsNullOrEmpty(targetToken) || amount <= 0)
             return BadRequest(new { error = "Invalid parameters" });
 
         try
         {
-            var quote = await apiClient.GetQuote(from, to, amount);
+            var quote = await apiClient.GetQuote(sourceChain, sourceToken, targetChain, targetToken, sourceAmount: amount);
             return Json(new
             {
                 exchangeRate = quote.ExchangeRate,
                 protocolFee = quote.ProtocolFee,
                 networkFee = quote.NetworkFee,
+                gaslessNetworkFee = quote.GaslessNetworkFee,
                 minAmount = quote.MinAmount,
                 maxAmount = quote.MaxAmount,
-                protocolFeeRate = quote.ProtocolFeeRate
+                protocolFeeRate = quote.ProtocolFeeRate,
+                sourceAmount = quote.SourceAmountCalculated,
+                targetAmount = quote.TargetAmountCalculated
             });
         }
         catch (Exception ex)

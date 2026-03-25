@@ -357,12 +357,15 @@
     }
 
     var quoteTimeout = null;
-    // Map chain name to BTC token_id for quote API
-    var btcTokenIdMap = { 'Lightning': 'btc_lightning', 'Bitcoin': 'btc_onchain', 'Arkade': 'btc_arkade' };
+    // v2 quote API uses source_chain/target_chain (chain names or IDs) + source_token/target_token
+    // For BTC: chain = "Lightning"/"Bitcoin"/"Arkade", token = "btc"
+    // For EVM: chain = "137"/"1"/"42161", token = contract address (from token_id)
+    var chainToId = { 'Polygon': '137', 'Ethereum': '1', 'Arbitrum': '42161' };
 
     function fetchQuote() {
-        var sourceChain = sourceChainInput.value;
-        var targetToken = targetTokenInput.value;
+        var sourceChain = sourceChainInput.value; // e.g. "Lightning"
+        var targetChain = targetChainInput.value; // e.g. "Polygon"
+        var targetToken = targetTokenInput.value; // e.g. contract address
         var amount = parseInt(amountInput.value, 10);
 
         quoteInfo.style.display = 'none';
@@ -370,17 +373,22 @@
         quoteLoading.style.display = 'none';
         lastQuoteData = null;
 
-        // Build from/to token_ids
-        var from = btcTokenIdMap[sourceChain]; // e.g. 'btc_lightning'
-        var to = targetToken; // e.g. 'usdc_eth' (already a token_id from dropdown)
-        if (!from || !to || !amount || amount <= 0) return;
+        if (!sourceChain || !targetChain || !targetToken || !amount || amount <= 0) return;
+
+        // Convert chain names to what the v2 API expects
+        var qSourceChain = sourceChain; // "Lightning", "Bitcoin" etc.
+        var qSourceToken = 'btc';
+        var qTargetChain = chainToId[targetChain] || targetChain;
+        var qTargetToken = targetToken; // contract address
 
         quoteLoading.style.display = '';
 
         var url = '@Url.Action("GetQuoteApi", "UILendaSwap", new { storeId = "__STOREID__" })'.replace('__STOREID__', '@storeId');
         url += (url.indexOf('?') >= 0 ? '&' : '?') +
-            'from=' + encodeURIComponent(from) +
-            '&to=' + encodeURIComponent(to) +
+            'sourceChain=' + encodeURIComponent(qSourceChain) +
+            '&sourceToken=' + encodeURIComponent(qSourceToken) +
+            '&targetChain=' + encodeURIComponent(qTargetChain) +
+            '&targetToken=' + encodeURIComponent(qTargetToken) +
             '&amount=' + amount;
 
         fetch(url, { credentials: 'same-origin' })
@@ -400,15 +408,10 @@
                     quoteMinMax.textContent = 'Min: ' + (data.minAmount || 0).toLocaleString() + ' \u00b7 Max: ' + (data.maxAmount || 0).toLocaleString() + ' sats';
                 }
 
-                var totalFeeSats = (data.protocolFee || 0) + (data.networkFee || 0);
-                var rate = parseFloat(data.exchangeRate);
-                var satsAmount = parseInt(amountInput.value, 10);
-                var netSats = satsAmount - totalFeeSats;
-                if (netSats < 0) netSats = 0;
+                var totalFeeSats = (data.protocolFee || 0) + (data.networkFee || 0) + (data.gaslessNetworkFee || 0);
 
-                if (!isNaN(rate) && rate > 0 && netSats > 0) {
-                    var receiveVal = (netSats / 100000000) * rate;
-                    quoteReceive.textContent = 'You receive: \u2248 ' + receiveVal.toFixed(2) + ' ' + (targetTokenInput.value || '');
+                if (data.targetAmount) {
+                    quoteReceive.textContent = 'You receive: ' + data.targetAmount + ' (smallest unit)';
                 } else {
                     quoteReceive.textContent = '';
                 }
