@@ -9,4 +9,7 @@ public class LendaSwapSettingsViewModel
 
     [Display(Name = "Default Arkade Address")]
     public string DefaultArkadeAddress { get; set; }
+
+    [Display(Name = "Default EVM Address")]
+    public string DefaultEvmAddress { get; set; }
 }

@@ -21,16 +21,20 @@
         SwapStatus.PendingClaim => "bg-primary",
         SwapStatus.PayingFromWallet => "bg-info",
         SwapStatus.PendingPayment => "bg-warning text-dark",
+        SwapStatus.Processing => "bg-info",
         _ => "bg-light text-dark"
     };
 
     var preimage = ViewData["Preimage"] as string;
-    var isArkadeSwap = Model.SwapType == SwapType.BitcoinToArkade;
-    var isLightningSwap = Model.SwapType == SwapType.LightningToUsdc;
+    var isArkadeSwap = Model.SwapType is SwapType.BitcoinToArkade or SwapType.LightningToArkade;
+    var isLightningSwap = Model.SwapType is SwapType.LightningToUsdc or SwapType.LightningToEvm;
+    var isEvmSwap = Model.SwapType is SwapType.LightningToEvm or SwapType.LightningToUsdc;
+    var isEvmToBtc = Model.SwapType is SwapType.EvmToLightning or SwapType.EvmToBitcoin;
     var needsClaim = Model.Status is SwapStatus.PendingClaim or SwapStatus.Claiming;
     var isFailed = Model.Status == SwapStatus.Failed;
     var isTerminal = Model.Status is SwapStatus.Completed or SwapStatus.Failed or SwapStatus.Expired;
-    var needsManualPay = Model.Status == SwapStatus.PendingPayment && !string.IsNullOrEmpty(Model.PaymentAddress);
+    var needsEvmFunding = isEvmToBtc && Model.Status == SwapStatus.PendingPayment && !string.IsNullOrEmpty(Model.EvmHtlcAddress);
+    var needsManualPay = !isEvmToBtc && Model.Status == SwapStatus.PendingPayment && !string.IsNullOrEmpty(Model.PaymentAddress);
     var qrData = needsManualPay
         ? (isLightningSwap
             ? Model.PaymentAddress.ToUpper()
@@ -52,15 +56,84 @@
 
         <div class="d-flex align-items-center gap-3 mb-4">
             <span class="badge @badgeClass fs-6">@Model.Status</span>
-            @if (isLightningSwap)
-            {
-                <span class="badge bg-primary fs-6">Lightning -> USDC</span>
-            }
-            else
-            {
-                <span class="badge bg-info fs-6">Bitcoin -> Arkade</span>
-            }
+            <span class="badge bg-info fs-6">
+                @(Model.SwapType switch
+                {
+                    SwapType.LightningToEvm => $"Lightning -> EVM ({Model.TargetChain})",
+                    SwapType.LightningToUsdc => "Lightning -> USDC",
+                    SwapType.BitcoinToArkade => "Bitcoin -> Arkade",
+                    SwapType.LightningToArkade => "Lightning -> Arkade",
+                    SwapType.EvmToLightning => $"EVM ({Model.SourceChain}) -> Lightning",
+                    SwapType.EvmToBitcoin => $"EVM ({Model.SourceChain}) -> Bitcoin",
+                    _ => Model.SwapType.ToString()
+                })
+            </span>
         </div>
+
+        <!-- EVM→BTC: Show EVM HTLC funding instructions -->
+        @if (needsEvmFunding)
+        {
+            <div class="alert alert-warning">
+                <h5 class="alert-heading mb-2">Action Required: Fund the EVM HTLC</h5>
+                <p class="mb-2">
+                    Send <strong>@(Model.SourceAmountRaw ?? "the required amount of") tokens</strong>
+                    to the EVM HTLC contract from your EVM wallet.
+                    @if (Model.SwapType == SwapType.EvmToLightning)
+                    {
+                        <span>Once funded, the server will automatically pay the Lightning invoice to your store. <strong>No further action needed after funding.</strong></span>
+                    }
+                    else
+                    {
+                        <span>Once funded, the server will send BTC to a Taproot HTLC for you to claim.</span>
+                    }
+                </p>
+                <div class="mb-2">
+                    <strong>EVM HTLC Contract Address:</strong><br/>
+                    <div class="d-flex align-items-center gap-2 mt-1">
+                        <code class="text-break user-select-all">@Model.EvmHtlcAddress</code>
+                        <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.EvmHtlcAddress" title="Copy">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        </button>
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(Model.SourceAmountRaw))
+                {
+                    <div class="mb-2">
+                        <strong>Amount to send:</strong> @Model.SourceAmountRaw (in token's smallest unit)
+                    </div>
+                }
+                <div class="text-secondary small">
+                    <strong>You will receive:</strong> @Model.AmountSats.ToString("N0") sats
+                    @if (Model.SwapType == SwapType.EvmToLightning)
+                    {
+                        <span>on Lightning</span>
+                    }
+                    else
+                    {
+                        <span>on Bitcoin</span>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- EVM→BTC: Processing status -->
+        @if (isEvmToBtc && Model.Status == SwapStatus.Processing)
+        {
+            <div class="alert alert-info">
+                <h5 class="alert-heading mb-2">Processing</h5>
+                <p class="mb-0">
+                    @if (Model.SwapType == SwapType.EvmToLightning)
+                    {
+                        <span>Your EVM funding was detected. The server is now paying the Lightning invoice to your store.
+                        BTC will arrive in your Lightning wallet automatically.</span>
+                    }
+                    else
+                    {
+                        <span>Your EVM funding was detected. The server is sending BTC to a Taproot HTLC for you to claim.</span>
+                    }
+                </p>
+            </div>
+        }
 
         <!-- PAYING FROM WALLET: onchain tx in progress -->
         @if (Model.Status == SwapStatus.PayingFromWallet)
@@ -127,26 +200,28 @@
             </div>
         }
 
-        <!-- ACTION REQUIRED: Lightning/EVM retry claim -->
-        @if (isLightningSwap && needsClaim)
+        <!-- ACTION REQUIRED: EVM claim (requires user's EVM wallet) -->
+        @if (isEvmSwap && needsClaim)
         {
             <div class="alert alert-info">
-                <h5 class="alert-heading mb-2">Claiming via Gelato</h5>
+                <h5 class="alert-heading mb-2">Pending EVM Claim</h5>
                 <p class="mb-2">
-                    The USDC claim is being processed via Gelato (gasless relay).
-                    @if (!string.IsNullOrEmpty(Model.ErrorMessage))
-                    {
-                        <span class="text-danger">The last claim attempt failed. You can retry below.</span>
-                    }
-                    else
-                    {
-                        <span>If this takes too long, you can retry the claim.</span>
-                    }
+                    The server has funded the EVM HTLC. The claim requires an EIP-712 signature
+                    from your EVM wallet. Please use the LendaSwap app or your EVM wallet to
+                    complete the claim using the preimage below.
                 </p>
-                <form method="post" asp-action="RetryClaim" asp-controller="UILendaSwap"
-                      asp-route-storeId="@storeId" asp-route-swapId="@Model.Id" class="d-inline">
-                    <button type="submit" class="btn btn-primary btn-sm">Retry Gelato Claim</button>
-                </form>
+                @if (!string.IsNullOrEmpty(preimage))
+                {
+                    <div class="mb-2">
+                        <strong>Preimage (Secret):</strong><br />
+                        <div class="d-flex align-items-center gap-2 mt-1">
+                            <code class="text-break user-select-all">@preimage</code>
+                            <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@preimage" title="Copy">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                }
                 @if (Model.HtlcExpiryBlock.HasValue)
                 {
                     <div class="mt-2 text-secondary small">
@@ -303,17 +378,17 @@
             </div>
         }
 
-        <!-- Gelato Claim Status -->
-        @if (!string.IsNullOrEmpty(Model.GelatoTaskId))
+        <!-- Gasless Claim Status -->
+        @if (!string.IsNullOrEmpty(Model.GaslessTxHash))
         {
             <div class="bg-tile rounded p-3 mb-4">
                 <h4 class="mb-3">Claim Status</h4>
                 <dl class="row mb-0">
-                    <dt class="col-sm-4">Gelato Task ID</dt>
+                    <dt class="col-sm-4">Claim Tx Hash</dt>
                     <dd class="col-sm-8">
                         <div class="d-flex align-items-center gap-2">
-                            <code>@Model.GelatoTaskId</code>
-                            <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.GelatoTaskId" title="Copy">
+                            <code>@Model.GaslessTxHash</code>
+                            <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.GaslessTxHash" title="Copy">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                             </button>
                         </div>

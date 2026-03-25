@@ -32,12 +32,6 @@ public class UILendaSwapController(
     private IDataProtector Protector =>
         dataProtectionProvider.CreateProtector("LendaSwap.Preimage");
 
-    private static readonly HashSet<(string Source, string Target)> SupportedPairs = new()
-    {
-        ("btc_lightning", "usdc_pol"),
-        ("btc_onchain", "btc_arkade")
-    };
-
     [HttpGet("settings")]
     public async Task<IActionResult> Settings(string storeId)
     {
@@ -45,7 +39,8 @@ public class UILendaSwapController(
         var model = new LendaSwapSettingsViewModel
         {
             DefaultPolygonAddress = settings.DefaultPolygonAddress,
-            DefaultArkadeAddress = settings.DefaultArkadeAddress
+            DefaultArkadeAddress = settings.DefaultArkadeAddress,
+            DefaultEvmAddress = settings.DefaultEvmAddress
         };
         return View(model);
     }
@@ -62,7 +57,8 @@ public class UILendaSwapController(
         var settings = new LendaSwapSettings
         {
             DefaultPolygonAddress = model.DefaultPolygonAddress,
-            DefaultArkadeAddress = model.DefaultArkadeAddress
+            DefaultArkadeAddress = model.DefaultArkadeAddress,
+            DefaultEvmAddress = model.DefaultEvmAddress
         };
 
         await dbContextFactory.SetSettingAsync(storeId, settings);
@@ -79,29 +75,32 @@ public class UILendaSwapController(
     {
         var storeSettings = await dbContextFactory.GetSettingAsync(storeId);
 
-        List<AssetPairResponse> pairs;
+        TokenInfosResponse tokens;
         try
         {
-            pairs = FilterSupportedPairs(await apiClient.GetAssetPairs());
+            tokens = await apiClient.GetTokens();
         }
         catch
         {
-            pairs = new List<AssetPairResponse>();
+            tokens = new TokenInfosResponse();
         }
 
         var (hasLightning, hasOnchain, hasHotWallet) = swapService.GetWalletStatus(CurrentStore);
         ViewData["HasLightning"] = hasLightning;
         ViewData["HasOnchain"] = hasOnchain;
         ViewData["HasOnchainHotWallet"] = hasHotWallet;
-        ViewData["DefaultPolygonAddress"] = storeSettings.DefaultPolygonAddress ?? "";
+        ViewData["DefaultEvmAddress"] = storeSettings.DefaultEvmAddress ?? storeSettings.DefaultPolygonAddress ?? "";
         ViewData["DefaultArkadeAddress"] = storeSettings.DefaultArkadeAddress ?? "";
 
         var model = new CreateSwapViewModel
         {
-            SourceToken = "btc_lightning",
-            TargetToken = "usdc_pol",
-            ClaimDestination = storeSettings.DefaultPolygonAddress,
-            AvailablePairs = pairs
+            SourceChain = "Lightning",
+            SourceToken = "btc",
+            TargetChain = "137",
+            TargetToken = "",
+            ClaimDestination = storeSettings.DefaultEvmAddress ?? storeSettings.DefaultPolygonAddress,
+            BtcTokens = tokens.BtcTokens,
+            EvmTokens = tokens.EvmTokens
         };
         return View(model);
     }
@@ -119,11 +118,14 @@ public class UILendaSwapController(
 
         try
         {
-            model.AvailablePairs = FilterSupportedPairs(await apiClient.GetAssetPairs());
+            var tokens = await apiClient.GetTokens();
+            model.BtcTokens = tokens.BtcTokens;
+            model.EvmTokens = tokens.EvmTokens;
         }
         catch
         {
-            model.AvailablePairs = new List<AssetPairResponse>();
+            model.BtcTokens = new List<TokenInfo>();
+            model.EvmTokens = new List<TokenInfo>();
         }
 
         if (!ModelState.IsValid)
@@ -152,14 +154,23 @@ public class UILendaSwapController(
             return View(nameof(Send), model);
         }
 
-        // Auto-pay from store's wallet
-        if (swap.Status == SwapStatus.PendingPayment)
+        // For EVM→BTC flows, the user funds EVM manually — no auto-pay from plugin
+        if (swap.SwapType is SwapType.EvmToLightning or SwapType.EvmToBitcoin)
+        {
+            TempData.SetStatusMessageModel(new StatusMessageModel
+            {
+                Message = "Swap created. Please fund the EVM HTLC from your wallet to complete the swap.",
+                Severity = StatusMessageModel.StatusSeverity.Success
+            });
+        }
+        // For BTC→EVM/Arkade flows, try auto-pay from store's wallet
+        else if (swap.Status == SwapStatus.PendingPayment)
         {
             var (paid, _) = await swapService.TryAutoPayAsync(CurrentStore, swap, ct);
 
             if (paid)
             {
-                var successMsg = swap.SwapType == SwapType.LightningToUsdc
+                var successMsg = swap.SwapType is SwapType.LightningToEvm or SwapType.LightningToUsdc or SwapType.LightningToArkade
                     ? "Swap created and paid via Lightning. Waiting for claim."
                     : "Swap created and payment broadcast from hot wallet.";
                 TempData.SetStatusMessageModel(new StatusMessageModel
@@ -215,22 +226,28 @@ public class UILendaSwapController(
     }
 
     [HttpGet("api/quote")]
-    public async Task<IActionResult> GetQuoteApi(string storeId, string from, string to, long amount)
+    public async Task<IActionResult> GetQuoteApi(
+        string storeId, string sourceChain, string sourceToken,
+        string targetChain, string targetToken, long amount)
     {
-        if (string.IsNullOrEmpty(from) || string.IsNullOrEmpty(to) || amount <= 0)
+        if (string.IsNullOrEmpty(sourceChain) || string.IsNullOrEmpty(sourceToken) ||
+            string.IsNullOrEmpty(targetChain) || string.IsNullOrEmpty(targetToken) || amount <= 0)
             return BadRequest(new { error = "Invalid parameters" });
 
         try
         {
-            var quote = await apiClient.GetQuote(from, to, amount);
+            var quote = await apiClient.GetQuote(sourceChain, sourceToken, targetChain, targetToken, sourceAmount: amount);
             return Json(new
             {
                 exchangeRate = quote.ExchangeRate,
                 protocolFee = quote.ProtocolFee,
                 networkFee = quote.NetworkFee,
+                gaslessNetworkFee = quote.GaslessNetworkFee,
                 minAmount = quote.MinAmount,
                 maxAmount = quote.MaxAmount,
-                protocolFeeRate = quote.ProtocolFeeRate
+                protocolFeeRate = quote.ProtocolFeeRate,
+                sourceAmount = quote.SourceAmountCalculated,
+                targetAmount = quote.TargetAmountCalculated
             });
         }
         catch (Exception ex)
@@ -279,59 +296,34 @@ public class UILendaSwapController(
         if (swap is null)
             return NotFound();
 
-        if (swap.SwapType != SwapType.LightningToUsdc ||
-            swap.Status is not (SwapStatus.PendingClaim or SwapStatus.Claiming))
+        // Gasless claim for EVM swaps now requires EIP-712 signature (EVM private key).
+        // The BTCPay plugin cannot auto-claim EVM swaps — the user must claim from their EVM wallet.
+        if (swap.SwapType is SwapType.LightningToEvm or SwapType.LightningToUsdc)
         {
             TempData.SetStatusMessageModel(new StatusMessageModel
             {
-                Message = "Retry is only available for Lightning→USDC swaps in PendingClaim or Claiming status.",
+                Message = "EVM claims require an EIP-712 signature from your EVM wallet. Please claim from your wallet directly.",
                 Severity = StatusMessageModel.StatusSeverity.Warning
             });
             return RedirectToAction(nameof(SwapDetail), new { storeId, swapId });
         }
 
-        try
+        if (swap.Status is not (SwapStatus.PendingClaim or SwapStatus.Claiming))
         {
-            var preimage = Protector.Unprotect(swap.PreimageEncrypted);
-            var result = await apiClient.ClaimViaGelato(swap.LendaSwapId, preimage);
-
-            swap.Status = SwapStatus.Claiming;
-            swap.GelatoTaskId = result.TaskId;
-            swap.ErrorMessage = null;
-            swap.UpdatedAt = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync();
-
-            logger.LogInformation("Gelato claim retried for swap {SwapId}, task {TaskId}", swap.Id, result.TaskId);
-
             TempData.SetStatusMessageModel(new StatusMessageModel
             {
-                Message = $"Gelato claim triggered successfully. Task ID: {result.TaskId}",
-                Severity = StatusMessageModel.StatusSeverity.Success
+                Message = "Retry is only available for swaps in PendingClaim or Claiming status.",
+                Severity = StatusMessageModel.StatusSeverity.Warning
             });
+            return RedirectToAction(nameof(SwapDetail), new { storeId, swapId });
         }
-        catch (Exception ex)
+
+        TempData.SetStatusMessageModel(new StatusMessageModel
         {
-            swap.ErrorMessage = $"Retry claim failed: {ex.Message}";
-            swap.UpdatedAt = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync();
-
-            logger.LogWarning(ex, "Retry claim failed for swap {SwapId}", swap.Id);
-
-            TempData.SetStatusMessageModel(new StatusMessageModel
-            {
-                Message = $"Retry claim failed: {ex.Message}",
-                Severity = StatusMessageModel.StatusSeverity.Error
-            });
-        }
+            Message = "Claim must be done from the client wallet for this swap type.",
+            Severity = StatusMessageModel.StatusSeverity.Info
+        });
 
         return RedirectToAction(nameof(SwapDetail), new { storeId, swapId });
-    }
-
-    private static List<AssetPairResponse> FilterSupportedPairs(List<AssetPairResponse> pairs)
-    {
-        return pairs
-            .Where(p => p?.Source?.TokenId != null && p?.Target?.TokenId != null &&
-                        SupportedPairs.Contains((p.Source.TokenId, p.Target.TokenId)))
-            .ToList();
     }
 }

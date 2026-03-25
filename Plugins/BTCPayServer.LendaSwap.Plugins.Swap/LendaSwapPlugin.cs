@@ -29,6 +29,8 @@ public class LendaSwapPlugin : BaseBTCPayServerPlugin
 
         services.AddSingleton<SwapCryptoHelper>();
         services.AddScoped<SwapService>();
+        services.AddScoped<TaprootHtlcClaimService>();
+        services.AddScoped<EvmGaslessClaimService>();
 
         services.AddHttpClient<LendaSwapApiClient>((provider, client) =>
         {

@@ -58,21 +58,27 @@
                         <td>@swap.CreatedAt.ToString("yyyy-MM-dd HH:mm")</td>
                         <td>
                             @{
-                                var sourceLabel = swap.SourceToken switch
+                                var sourceLabel = swap.SwapType switch
                                 {
-                                    "btc_lightning" => "BTC (LN)",
-                                    "btc_onchain" => "BTC",
+                                    SwapType.LightningToUsdc or SwapType.LightningToEvm or SwapType.LightningToArkade => "BTC (LN)",
+                                    SwapType.BitcoinToArkade => "BTC",
+                                    SwapType.EvmToLightning or SwapType.EvmToBitcoin => swap.SourceToken ?? "EVM",
                                     _ => swap.SourceToken ?? "?"
                                 };
-                                var targetLabel = swap.TargetToken switch
+                                var targetLabel = swap.SwapType switch
                                 {
-                                    "usdc_pol" => "USDC",
-                                    "btc_arkade" => "BTC (Ark)",
+                                    SwapType.LightningToUsdc => "USDC",
+                                    SwapType.LightningToEvm => "EVM",
+                                    SwapType.BitcoinToArkade or SwapType.LightningToArkade => "Arkade",
+                                    SwapType.EvmToLightning => "BTC (LN)",
+                                    SwapType.EvmToBitcoin => "BTC",
                                     _ => swap.TargetToken ?? "?"
                                 };
-                                var typeBadge = swap.SwapType == SwapType.LightningToUsdc
-                                    ? "bg-primary"
-                                    : "bg-info";
+                                var typeBadge = swap.SwapType is SwapType.EvmToLightning or SwapType.EvmToBitcoin
+                                    ? "bg-success"
+                                    : swap.SwapType is SwapType.LightningToUsdc or SwapType.LightningToEvm
+                                        ? "bg-primary"
+                                        : "bg-info";
                             }
                             <span class="badge @typeBadge">@sourceLabel -> @targetLabel</span>
                         </td>
@@ -87,6 +93,7 @@
                                     SwapStatus.Claiming => "bg-primary",
                                     SwapStatus.PendingClaim => "bg-primary",
                                     SwapStatus.PayingFromWallet => "bg-info",
+                                    SwapStatus.Processing => "bg-info",
                                     SwapStatus.PendingPayment => "bg-warning text-dark",
                                     _ => "bg-light text-dark"
                                 };

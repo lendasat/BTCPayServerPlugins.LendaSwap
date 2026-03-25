@@ -46,55 +46,44 @@
             <div class="bg-tile rounded p-4 mb-4">
                 <h4 class="mb-3">I want to send</h4>
 
-                <div class="d-flex flex-column gap-2 mb-4" id="sourceOptions">
-                    @foreach (var pair in Model.AvailablePairs)
-                    {
-                        var sourceId = pair.Source?.TokenId;
-                        var targetId = pair.Target?.TokenId;
-                        var sourceLabel = sourceId switch
-                        {
-                            "btc_lightning" => "BTC (Lightning)",
-                            "btc_onchain" => "BTC (Onchain)",
-                            "btc_arkade" => "BTC (Arkade)",
-                            _ => pair.Source?.Symbol + " (" + pair.Source?.Name + ")"
-                        };
-                        var targetLabel = targetId switch
-                        {
-                            "usdc_pol" => "USDC (Polygon)",
-                            "btc_arkade" => "BTC (Arkade)",
-                            _ => pair.Target?.Symbol + " (" + pair.Target?.Name + ")"
-                        };
-                        var walletAvailable = sourceId switch
-                        {
-                            "btc_lightning" => hasLightning,
-                            "btc_onchain" => hasOnchain,
-                            _ => false
-                        };
-                        var isHotWallet = sourceId switch
-                        {
-                            "btc_lightning" => hasLightning,
-                            "btc_onchain" => hasOnchainHot,
-                            _ => false
-                        };
-                        var isChecked = sourceId == Model.SourceToken;
-                        var isDisabled = !walletAvailable;
-                        <label class="d-flex align-items-center gap-3 p-3 rounded border @(isDisabled ? "opacity-50" : isChecked ? "border-primary bg-primary bg-opacity-10" : "")"
-                               style="cursor: @(isDisabled ? "not-allowed" : "pointer");" data-source="@sourceId" data-target="@targetId"
-                               data-wallet-available="@walletAvailable.ToString().ToLowerInvariant()">
-                            <input type="radio" name="sourceChoice" value="@sourceId"
-                                   class="form-check-input mt-0" @(isChecked && !isDisabled ? "checked" : "")
-                                   data-target="@targetId"
-                                   @(isDisabled ? "disabled" : "") />
+                <!-- Source Chain Selection -->
+                <div class="form-group mb-3">
+                    <label class="form-label">Source</label>
+                    <div class="d-flex flex-column gap-2" id="sourceOptions">
+                        <label class="d-flex align-items-center gap-3 p-3 rounded border @(hasLightning ? "" : "opacity-50")"
+                               style="cursor: @(hasLightning ? "pointer" : "not-allowed");"
+                               data-source-chain="Lightning" data-source-token="btc">
+                            <input type="radio" name="sourceChoice" value="Lightning"
+                                   class="form-check-input mt-0" checked
+                                   data-source-chain="Lightning" data-source-token="btc"
+                                   @(!hasLightning ? "disabled" : "") />
                             <div class="flex-grow-1">
-                                <span class="fw-semibold">@sourceLabel</span>
-                                <span class="text-secondary mx-1">-></span>
-                                <span class="fw-semibold">@targetLabel</span>
+                                <span class="fw-semibold">BTC (Lightning)</span>
                             </div>
-                            @if (isHotWallet)
+                            @if (hasLightning)
                             {
                                 <span class="badge bg-success">Auto-pay</span>
                             }
-                            else if (walletAvailable)
+                            else
+                            {
+                                <span class="badge bg-danger">Not configured</span>
+                            }
+                        </label>
+                        <label class="d-flex align-items-center gap-3 p-3 rounded border @(hasOnchain ? "" : "opacity-50")"
+                               style="cursor: @(hasOnchain ? "pointer" : "not-allowed");"
+                               data-source-chain="Bitcoin" data-source-token="btc">
+                            <input type="radio" name="sourceChoice" value="Bitcoin"
+                                   class="form-check-input mt-0"
+                                   data-source-chain="Bitcoin" data-source-token="btc"
+                                   @(!hasOnchain ? "disabled" : "") />
+                            <div class="flex-grow-1">
+                                <span class="fw-semibold">BTC (Onchain)</span>
+                            </div>
+                            @if (hasOnchainHot)
+                            {
+                                <span class="badge bg-success">Auto-pay</span>
+                            }
+                            else if (hasOnchain)
                             {
                                 <span class="badge bg-warning text-dark">Manual pay</span>
                             }
@@ -103,10 +92,22 @@
                                 <span class="badge bg-danger">Not configured</span>
                             }
                         </label>
-                    }
+                        @* EVM source options are generated dynamically by JS below *@
+                        <div id="evmSourceOptions"></div>
+                    </div>
                 </div>
 
+                <!-- Target Chain/Token Selection -->
+                <div class="form-group mb-3">
+                    <label class="form-label">Receive on</label>
+                    <select class="form-select" id="targetSelect">
+                        <option value="" data-chain="" data-token="">-- Select target --</option>
+                    </select>
+                </div>
+
+                <input type="hidden" asp-for="SourceChain" id="sourceChain" />
                 <input type="hidden" asp-for="SourceToken" id="sourceToken" />
+                <input type="hidden" asp-for="TargetChain" id="targetChain" />
                 <input type="hidden" asp-for="TargetToken" id="targetToken" />
 
                 <div class="form-group mb-3">
@@ -132,12 +133,12 @@
             </div>
 
             <div class="bg-tile rounded p-4 mb-4" id="destinationSection">
-                <h4 class="mb-3" id="destinationTitle">Receive USDC</h4>
+                <h4 class="mb-3" id="destinationTitle">Destination</h4>
                 <div class="form-group">
                     <label asp-for="ClaimDestination" class="form-label" id="destinationLabel">Destination Address</label>
-                    <input asp-for="ClaimDestination" class="form-control" id="claimDestination" placeholder="0x..." />
+                    <input asp-for="ClaimDestination" class="form-control" id="claimDestination" placeholder="0x... or ark1..." />
                     <span asp-validation-for="ClaimDestination" class="text-danger"></span>
-                    <div class="text-secondary mt-1 small" id="destinationHint">Polygon address (0x...) where you will receive USDC.</div>
+                    <div class="text-secondary mt-1 small" id="destinationHint">Address where you will receive funds.</div>
                 </div>
             </div>
 
@@ -178,22 +179,32 @@
 
 <script>
 (function () {
-    var pairsJson = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.AvailablePairs));
-    var pairs = pairsJson || [];
+    var btcTokens = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.BtcTokens));
+    var evmTokens = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.EvmTokens));
 
     var walletStatus = {
-        'btc_lightning': @(hasLightning ? "true" : "false"),
-        'btc_onchain': @(hasOnchain ? "true" : "false"),
-        'btc_onchain_hot': @(hasOnchainHot ? "true" : "false")
+        'Lightning': @(hasLightning ? "true" : "false"),
+        'Bitcoin': @(hasOnchain ? "true" : "false")
     };
 
     var defaultAddresses = {
-        'usdc_pol': '@Html.Raw(ViewData["DefaultPolygonAddress"])',
-        'btc_arkade': '@Html.Raw(ViewData["DefaultArkadeAddress"])'
+        'evm': '@Html.Raw(ViewData["DefaultEvmAddress"])',
+        'Arkade': '@Html.Raw(ViewData["DefaultArkadeAddress"])'
     };
 
-    var sourceInput = document.getElementById('sourceToken');
-    var targetInput = document.getElementById('targetToken');
+    // Chain name mapping
+    var chainNames = {
+        '137': 'Polygon',
+        '1': 'Ethereum',
+        '42161': 'Arbitrum',
+        'Arkade': 'Arkade'
+    };
+
+    var sourceChainInput = document.getElementById('sourceChain');
+    var sourceTokenInput = document.getElementById('sourceToken');
+    var targetChainInput = document.getElementById('targetChain');
+    var targetTokenInput = document.getElementById('targetToken');
+    var targetSelect = document.getElementById('targetSelect');
     var amountInput = document.getElementById('amountSats');
     var submitBtn = document.getElementById('submitBtn');
     var quoteInfo = document.getElementById('quoteInfo');
@@ -217,88 +228,187 @@
     var confirmDest = document.getElementById('confirmDest');
     var confirmSendBtn = document.getElementById('confirmSendBtn');
 
-    // Store last quote data for the modal
     var lastQuoteData = null;
 
-    sourceInput.value = '@Model.SourceToken';
-    targetInput.value = '@Model.TargetToken';
-
-    function updateSubmitButton() {
-        var source = sourceInput.value;
-        var available = walletStatus[source] || false;
-        submitBtn.disabled = !available;
+    // Check if a source chain is an EVM chain ID
+    function isEvmSource(chain) {
+        return chain === '137' || chain === '1' || chain === '42161';
     }
 
-    var currentTarget = targetInput.value;
+    // Determine valid targets for a given source chain + token
+    function getValidTargets(sourceChain, sourceToken) {
+        var targets = [];
+        if (sourceChain === 'Lightning' || sourceChain === 'Bitcoin') {
+            // BTC→EVM/Arkade: Can target EVM chains and Arkade
+            evmTokens.forEach(function (t) {
+                targets.push({
+                    chain: t.chain,
+                    token: t.token_id,
+                    label: t.symbol + ' (' + (chainNames[t.chain] || t.chain) + ')',
+                    symbol: t.symbol
+                });
+            });
+            targets.push({
+                chain: 'Arkade',
+                token: 'btc',
+                label: 'BTC (Arkade)',
+                symbol: 'BTC'
+            });
+        } else if (isEvmSource(sourceChain)) {
+            // EVM→BTC: Can target Lightning or Bitcoin onchain
+            if (walletStatus['Lightning']) {
+                targets.push({
+                    chain: 'Lightning',
+                    token: 'btc',
+                    label: 'BTC (Lightning) — fully automatic',
+                    symbol: 'BTC'
+                });
+            }
+            targets.push({
+                chain: 'Bitcoin',
+                token: 'btc',
+                label: 'BTC (Onchain)',
+                symbol: 'BTC'
+            });
+        }
+        return targets;
+    }
 
-    function updateDestinationUI(targetToken) {
-        if (targetToken === 'btc_arkade') {
+    function populateTargetSelect(sourceChain, sourceToken) {
+        var targets = getValidTargets(sourceChain, sourceToken);
+        targetSelect.innerHTML = '<option value="" data-chain="" data-token="">-- Select target --</option>';
+        targets.forEach(function (t) {
+            var opt = document.createElement('option');
+            opt.value = t.chain + '|' + t.token;
+            opt.dataset.chain = t.chain;
+            opt.dataset.token = t.token;
+            opt.textContent = t.label;
+            targetSelect.appendChild(opt);
+        });
+    }
+
+    function updateDestinationUI(targetChain) {
+        var srcChain = sourceChainInput.value;
+        if (isEvmSource(srcChain)) {
+            // EVM→BTC: ask for the EVM address that will fund the HTLC
+            destinationTitle.textContent = 'Your EVM Wallet';
+            destinationLabel.textContent = 'Your EVM Address (sender)';
+            destinationHint.textContent = 'The EVM address (0x...) from which you will fund the swap. BTC will be received by your store automatically.';
+            claimDestination.placeholder = '0x...';
+            claimDestination.value = defaultAddresses['evm'] || '';
+        } else if (targetChain === 'Arkade') {
             destinationTitle.textContent = 'Receive BTC (Arkade)';
             destinationLabel.textContent = 'Arkade Destination Address';
             destinationHint.textContent = 'Arkade address where you will receive BTC.';
             claimDestination.placeholder = 'ark1...';
-        } else {
-            destinationTitle.textContent = 'Receive USDC';
-            destinationLabel.textContent = 'USDC Destination Address (Polygon)';
-            destinationHint.textContent = 'Polygon address (0x...) where you will receive USDC.';
+            claimDestination.value = defaultAddresses['Arkade'] || '';
+        } else if (targetChain) {
+            var name = chainNames[targetChain] || 'EVM';
+            destinationTitle.textContent = 'Receive on ' + name;
+            destinationLabel.textContent = name + ' Destination Address';
+            destinationHint.textContent = name + ' address (0x...) where you will receive tokens.';
             claimDestination.placeholder = '0x...';
+            claimDestination.value = defaultAddresses['evm'] || '';
         }
     }
 
-    function updateSelection(sourceToken, targetToken) {
-        sourceInput.value = sourceToken;
-        targetInput.value = targetToken;
+    // Dynamically add EVM tokens as source options
+    var evmSourceContainer = document.getElementById('evmSourceOptions');
+    // Group EVM tokens by chain to avoid duplicates per chain
+    var seenChains = {};
+    evmTokens.forEach(function (t) {
+        var key = t.chain + '|' + t.token_id;
+        if (seenChains[key]) return;
+        seenChains[key] = true;
+
+        var label = document.createElement('label');
+        label.className = 'd-flex align-items-center gap-3 p-3 rounded border';
+        label.style.cursor = 'pointer';
+        label.dataset.sourceChain = t.chain;
+        label.dataset.sourceToken = t.token_id;
+
+        var radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'sourceChoice';
+        radio.value = t.chain + '|' + t.token_id;
+        radio.className = 'form-check-input mt-0';
+        radio.dataset.sourceChain = t.chain;
+        radio.dataset.sourceToken = t.token_id;
+
+        var div = document.createElement('div');
+        div.className = 'flex-grow-1';
+        var span = document.createElement('span');
+        span.className = 'fw-semibold';
+        span.textContent = t.symbol + ' (' + (chainNames[t.chain] || t.chain) + ')';
+        div.appendChild(span);
+
+        var badge = document.createElement('span');
+        badge.className = 'badge bg-primary';
+        badge.textContent = 'Receive BTC';
+
+        label.appendChild(radio);
+        label.appendChild(div);
+        label.appendChild(badge);
+        evmSourceContainer.appendChild(label);
+
+        radio.addEventListener('change', function () {
+            updateSelection(this.dataset.sourceChain, this.dataset.sourceToken);
+        });
+    });
+
+    function updateSubmitButton() {
+        var sourceChain = sourceChainInput.value;
+        var targetChain = targetChainInput.value;
+        // For BTC sources, need wallet config. For EVM sources, always available.
+        var available = isEvmSource(sourceChain) || (walletStatus[sourceChain] || false);
+        submitBtn.disabled = !available || !targetChain;
+    }
+
+    function updateSelection(sourceChain, sourceToken) {
+        sourceChainInput.value = sourceChain;
+        sourceTokenInput.value = sourceToken || 'btc';
 
         document.querySelectorAll('#sourceOptions label').forEach(function (label) {
-            var isSelected = label.dataset.source === sourceToken;
-            var isAvailable = label.dataset.walletAvailable === 'true';
-            if (isSelected && isAvailable) {
+            var isSelected = label.dataset.sourceChain === sourceChain &&
+                (!sourceToken || !label.dataset.sourceToken || label.dataset.sourceToken === sourceToken);
+            if (isSelected) {
                 label.classList.add('border-primary', 'bg-primary', 'bg-opacity-10');
             } else {
                 label.classList.remove('border-primary', 'bg-primary', 'bg-opacity-10');
             }
         });
 
+        populateTargetSelect(sourceChain, sourceToken);
         updateSubmitButton();
-        updateDestinationUI(targetToken);
-
-        // Restore default address from settings when target type changes
-        if (targetToken !== currentTarget) {
-            claimDestination.value = defaultAddresses[targetToken] || '';
-            currentTarget = targetToken;
-        }
-
-        debouncedFetchQuote();
     }
 
     radios.forEach(function (radio) {
         radio.addEventListener('change', function () {
-            updateSelection(this.value, this.dataset.target);
+            updateSelection(this.dataset.sourceChain, this.dataset.sourceToken);
         });
     });
 
-    // Initialize: use the default selection
+    targetSelect.addEventListener('change', function () {
+        var selected = this.options[this.selectedIndex];
+        targetChainInput.value = selected.dataset.chain || '';
+        targetTokenInput.value = selected.dataset.token || '';
+        updateDestinationUI(selected.dataset.chain);
+        updateSubmitButton();
+        debouncedFetchQuote();
+    });
+
+    // Initialize
     var initialChecked = document.querySelector('input[name="sourceChoice"]:checked');
     if (initialChecked) {
-        updateSelection(initialChecked.value, initialChecked.dataset.target);
-    } else {
-        updateSubmitButton();
-        updateDestinationUI(targetInput.value);
-    }
-
-    function getTargetInfo(targetTokenId) {
-        for (var i = 0; i < pairs.length; i++) {
-            if (pairs[i].target && pairs[i].target.token_id === targetTokenId) {
-                return pairs[i].target;
-            }
-        }
-        return null;
+        updateSelection(initialChecked.dataset.sourceChain, initialChecked.dataset.sourceToken);
     }
 
     var quoteTimeout = null;
     function fetchQuote() {
-        var from = sourceInput.value;
-        var to = targetInput.value;
+        var sourceChain = sourceChainInput.value;
+        var sourceToken = sourceTokenInput.value;
+        var targetChain = targetChainInput.value;
+        var targetToken = targetTokenInput.value;
         var amount = parseInt(amountInput.value, 10);
 
         quoteInfo.style.display = 'none';
@@ -306,12 +416,17 @@
         quoteLoading.style.display = 'none';
         lastQuoteData = null;
 
-        if (!from || !to || !amount || amount <= 0) return;
+        if (!sourceChain || !targetChain || !sourceToken || !targetToken || !amount || amount <= 0) return;
 
         quoteLoading.style.display = '';
 
         var url = '@Url.Action("GetQuoteApi", "UILendaSwap", new { storeId = "__STOREID__" })'.replace('__STOREID__', '@storeId');
-        url += (url.indexOf('?') >= 0 ? '&' : '?') + 'from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to) + '&amount=' + amount;
+        url += (url.indexOf('?') >= 0 ? '&' : '?') +
+            'sourceChain=' + encodeURIComponent(sourceChain) +
+            '&sourceToken=' + encodeURIComponent(sourceToken) +
+            '&targetChain=' + encodeURIComponent(targetChain) +
+            '&targetToken=' + encodeURIComponent(targetToken) +
+            '&amount=' + amount;
 
         fetch(url, { credentials: 'same-origin' })
             .then(function (r) {
@@ -323,7 +438,6 @@
                 quoteInfo.style.display = '';
                 lastQuoteData = data;
 
-                // Min/max enforcement
                 if (data.minAmount || data.maxAmount) {
                     amountInput.min = data.minAmount || '';
                     amountInput.max = data.maxAmount || '';
@@ -331,25 +445,13 @@
                     quoteMinMax.textContent = 'Min: ' + (data.minAmount || 0).toLocaleString() + ' \u00b7 Max: ' + (data.maxAmount || 0).toLocaleString() + ' sats';
                 }
 
-                var rate = parseFloat(data.exchangeRate);
-                if (!isNaN(rate) && rate > 0) {
-                    var satsAmount = parseInt(amountInput.value, 10);
-                    var totalFeeSats = (data.protocolFee || 0) + (data.networkFee || 0);
-                    var netSats = satsAmount - totalFeeSats;
-                    if (netSats < 0) netSats = 0;
-
-                    var targetInfo = getTargetInfo(targetInput.value);
-                    if (targetInfo && targetInfo.symbol === 'USDC') {
-                        var receiveVal = (netSats / 100000000) * rate;
-                        quoteReceive.textContent = 'You receive: \u2248 $' + receiveVal.toFixed(2) + ' USDC';
-                    } else {
-                        quoteReceive.textContent = 'You receive: \u2248 ' + netSats.toLocaleString() + ' sats';
-                    }
-                    quoteFee.textContent = 'Fee: ' + totalFeeSats.toLocaleString() + ' sats';
+                if (data.targetAmount) {
+                    quoteReceive.textContent = 'You receive: \u2248 ' + data.targetAmount;
                 } else {
                     quoteReceive.textContent = '';
-                    quoteFee.textContent = '';
                 }
+                var totalFeeSats = (data.protocolFee || 0) + (data.networkFee || 0) + (data.gaslessNetworkFee || 0);
+                quoteFee.textContent = 'Fee: ' + totalFeeSats.toLocaleString() + ' sats';
             })
             .catch(function (err) {
                 quoteLoading.style.display = 'none';
@@ -381,7 +483,6 @@
             return;
         }
 
-        // Check min/max
         if (amountInput.min && amount < parseInt(amountInput.min, 10)) {
             quoteError.style.display = '';
             quoteError.textContent = 'Amount is below the minimum of ' + parseInt(amountInput.min, 10).toLocaleString() + ' sats.';
@@ -395,24 +496,19 @@
             return;
         }
 
-        // Populate confirmation modal
-        var totalFees = lastQuoteData ? ((lastQuoteData.protocolFee || 0) + (lastQuoteData.networkFee || 0)) : 0;
+        var totalFees = lastQuoteData ? ((lastQuoteData.protocolFee || 0) + (lastQuoteData.networkFee || 0) + (lastQuoteData.gaslessNetworkFee || 0)) : 0;
         confirmSend.textContent = amount.toLocaleString() + ' sats';
         confirmFees.textContent = totalFees.toLocaleString() + ' sats';
-        confirmReceive.textContent = quoteReceive.textContent ? quoteReceive.textContent.replace('You receive: ', '') : '\u2014';
+        confirmReceive.textContent = lastQuoteData && lastQuoteData.targetAmount ? lastQuoteData.targetAmount : '\u2014';
         confirmDest.textContent = claimDestination.value;
 
         confirmModal.show();
     });
 
-    // Submit form from confirmation modal
     confirmSendBtn.addEventListener('click', function () {
         confirmModal.hide();
-
-        // Loading state on submit button
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Creating swap...';
-
         sendForm.submit();
     });
 })();

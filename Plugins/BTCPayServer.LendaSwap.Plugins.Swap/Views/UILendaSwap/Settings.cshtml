@@ -41,6 +41,15 @@
                     Default Arkade address for receiving BTC via Bitcoin onchain to Arkade swaps.
                 </div>
             </div>
+
+            <div class="form-group">
+                <label asp-for="DefaultEvmAddress" class="form-label"></label>
+                <input asp-for="DefaultEvmAddress" class="form-control" placeholder="0x..." />
+                <span asp-validation-for="DefaultEvmAddress" class="text-danger"></span>
+                <div class="text-secondary mt-1">
+                    Default EVM address for receiving tokens on Polygon, Ethereum, or Arbitrum. Overrides the Polygon-specific address above.
+                </div>
+            </div>
         </div>
     </div>
 </form>

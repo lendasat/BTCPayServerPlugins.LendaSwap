@@ -45,8 +45,11 @@ public class SwapRecord
 
     public long? HtlcExpiryBlock { get; set; }
 
+    /// <summary>
+    /// Gasless claim transaction hash (was GelatoTaskId in v1).
+    /// </summary>
     [MaxLength(128)]
-    public string GelatoTaskId { get; set; }
+    public string GaslessTxHash { get; set; }
 
     [MaxLength(128)]
     public string TxId { get; set; }
@@ -54,8 +57,33 @@ public class SwapRecord
     [MaxLength(130)]
     public string RefundPubKeyHex { get; set; }
 
+    /// <summary>
+    /// For EVM→BTC flows: the EVM HTLC contract address that the user must fund.
+    /// Stores the token amount the user needs to send (in source token smallest units).
+    /// </summary>
+    [MaxLength(512)]
+    public string EvmHtlcAddress { get; set; }
+
+    /// <summary>
+    /// Source amount in token's smallest units (for EVM→BTC: how much EVM tokens to send).
+    /// </summary>
+    [MaxLength(128)]
+    public string SourceAmountRaw { get; set; }
+
     [MaxLength(1000)]
     public string ErrorMessage { get; set; }
+
+    /// <summary>
+    /// Source chain identifier (e.g. "Lightning", "Bitcoin", "Arkade").
+    /// </summary>
+    [MaxLength(32)]
+    public string SourceChain { get; set; }
+
+    /// <summary>
+    /// Target chain identifier (e.g. "137" for Polygon, "1" for Ethereum, "Arkade").
+    /// </summary>
+    [MaxLength(32)]
+    public string TargetChain { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -77,17 +105,25 @@ public class SwapRecord
 public enum SwapType
 {
     LightningToUsdc,
-    BitcoinToArkade
+    BitcoinToArkade,
+    LightningToEvm,
+    LightningToArkade,
+    EvmToLightning,
+    EvmToBitcoin
 }
 
 public enum SwapStatus
 {
     Created = 0,
+    /// <summary>BTC→EVM/Arkade: waiting for plugin to pay LN/onchain. EVM→BTC: waiting for user to fund EVM HTLC.</summary>
     PendingPayment = 1,
+    /// <summary>BTC→EVM: server funded EVM HTLC, needs EVM claim. EVM→BTC: server funded BTC HTLC, needs BTC claim.</summary>
     PendingClaim = 2,
     Claiming = 3,
     Completed = 4,
     Failed = 5,
     Expired = 6,
-    PayingFromWallet = 7
+    PayingFromWallet = 7,
+    /// <summary>EVM→BTC: user funded EVM, server is processing (paying LN or funding BTC HTLC).</summary>
+    Processing = 8
 }
