@@ -10,45 +10,31 @@ namespace BTCPayServer.LendaSwap.Plugins.Swap.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // Rename GelatoTaskId → GaslessTxHash
-            migrationBuilder.RenameColumn(
-                name: "GelatoTaskId",
-                schema: "BTCPayServer.LendaSwap.Plugins.Swap",
-                table: "SwapRecords",
-                newName: "GaslessTxHash");
+            // All operations use raw SQL with IF NOT EXISTS for idempotency.
+            // This handles cases where previous migrations without Designer files were skipped.
+            migrationBuilder.Sql(@"
+                ALTER TABLE ""BTCPayServer.LendaSwap.Plugins.Swap"".""SwapRecords""
+                    ADD COLUMN IF NOT EXISTS ""RefundPubKeyHex"" character varying(130),
+                    ADD COLUMN IF NOT EXISTS ""SourceChain"" character varying(32),
+                    ADD COLUMN IF NOT EXISTS ""TargetChain"" character varying(32),
+                    ADD COLUMN IF NOT EXISTS ""EvmHtlcAddress"" character varying(512),
+                    ADD COLUMN IF NOT EXISTS ""SourceAmountRaw"" character varying(128);
 
-            // Add new columns
-            migrationBuilder.AddColumn<string>(
-                name: "SourceChain",
-                schema: "BTCPayServer.LendaSwap.Plugins.Swap",
-                table: "SwapRecords",
-                type: "character varying(32)",
-                maxLength: 32,
-                nullable: true);
+                -- Rename GelatoTaskId → GaslessTxHash if the old column still exists
+                DO $$ BEGIN
+                    IF EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_schema = 'BTCPayServer.LendaSwap.Plugins.Swap'
+                               AND table_name = 'SwapRecords'
+                               AND column_name = 'GelatoTaskId') THEN
+                        ALTER TABLE ""BTCPayServer.LendaSwap.Plugins.Swap"".""SwapRecords""
+                        RENAME COLUMN ""GelatoTaskId"" TO ""GaslessTxHash"";
+                    END IF;
+                END $$;
 
-            migrationBuilder.AddColumn<string>(
-                name: "TargetChain",
-                schema: "BTCPayServer.LendaSwap.Plugins.Swap",
-                table: "SwapRecords",
-                type: "character varying(32)",
-                maxLength: 32,
-                nullable: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "EvmHtlcAddress",
-                schema: "BTCPayServer.LendaSwap.Plugins.Swap",
-                table: "SwapRecords",
-                type: "character varying(512)",
-                maxLength: 512,
-                nullable: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "SourceAmountRaw",
-                schema: "BTCPayServer.LendaSwap.Plugins.Swap",
-                table: "SwapRecords",
-                type: "character varying(128)",
-                maxLength: 128,
-                nullable: true);
+                -- Ensure GaslessTxHash exists even if GelatoTaskId never existed
+                ALTER TABLE ""BTCPayServer.LendaSwap.Plugins.Swap"".""SwapRecords""
+                    ADD COLUMN IF NOT EXISTS ""GaslessTxHash"" character varying(128);
+            ");
         }
 
         /// <inheritdoc />
