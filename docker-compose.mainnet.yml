@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    ports:
+      - "39372:5432"
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - mainnet_pgdata:/var/lib/postgresql/data
+
+  bitcoind:
+    image: btcpayserver/bitcoin:29.1
+    restart: unless-stopped
+    environment:
+      BITCOIN_NETWORK: mainnet
+      BITCOIN_WALLETDIR: "/data/wallets"
+      BITCOIN_EXTRA_ARGS: |-
+        server=1
+        prune=5000
+        rpcuser=ceiwHEbqWI83
+        rpcpassword=DwubwWsoo3
+        rpcport=43782
+        rpcbind=0.0.0.0:43782
+        rpcallowip=0.0.0.0/0
+        port=8333
+        whitelist=0.0.0.0/0
+        zmqpubrawblock=tcp://0.0.0.0:28332
+        zmqpubrawtx=tcp://0.0.0.0:28333
+        dbcache=1024
+        maxconnections=20
+    ports:
+      - "43782:43782"
+      - "8333:8333"
+    volumes:
+      - mainnet_bitcoin:/data
+
+  nbxplorer:
+    image: nicolasdorier/nbxplorer:2.5.29
+    restart: unless-stopped
+    ports:
+      - "32838:32838"
+    environment:
+      NBXPLORER_NETWORK: mainnet
+      NBXPLORER_CHAINS: "btc"
+      NBXPLORER_BTCRPCURL: http://bitcoind:43782/
+      NBXPLORER_BTCNODEENDPOINT: bitcoind:8333
+      NBXPLORER_BTCRPCUSER: ceiwHEbqWI83
+      NBXPLORER_BTCRPCPASSWORD: DwubwWsoo3
+      NBXPLORER_BIND: 0.0.0.0:32838
+      NBXPLORER_MINGAPSIZE: 5
+      NBXPLORER_MAXGAPSIZE: 10
+      NBXPLORER_VERBOSE: 1
+      NBXPLORER_POSTGRES: User ID=postgres;Include Error Detail=true;Host=postgres;Port=5432;Database=nbxplorer
+      NBXPLORER_EXPOSERPC: 1
+      NBXPLORER_NOAUTH: 1
+    depends_on:
+      - bitcoind
+      - postgres
+
+volumes:
+  mainnet_pgdata:
+  mainnet_bitcoin:
