@@ -143,7 +143,7 @@ public class SwapService(
                     ClaimingAddress = claimingAddress,
                     TargetAddress = model.ClaimDestination, // user's EVM receive address
                     TokenAddress = model.TargetToken,
-                    EvmChainId = ChainNameToId(model.TargetChain),
+                    EvmChainId = ParseEvmChainId(model.TargetChain),
                     Gasless = true,
                     UserId = pubKeyHex,
                     RefundPk = pubKeyHex
@@ -214,7 +214,7 @@ public class SwapService(
                     var result = await apiClient.CreateEvmToLightningSwap(new EvmToLightningSwapRequest
                     {
                         LightningInvoice = invoice.bolt11,
-                        EvmChainId = ChainNameToId(model.SourceChain),
+                        EvmChainId = ParseEvmChainId(model.SourceChain),
                         TokenAddress = model.SourceToken,
                         UserAddress = model.ClaimDestination, // user's EVM address (sender)
                         UserId = pubKeyHex,
@@ -242,7 +242,7 @@ public class SwapService(
                 {
                     HashLock = "0x" + paymentHash,
                     AmountOut = model.AmountSats,
-                    EvmChainId = ChainNameToId(model.SourceChain),
+                    EvmChainId = ParseEvmChainId(model.SourceChain),
                     TokenAddress = model.SourceToken,
                     UserAddress = model.ClaimDestination, // user's EVM address (sender)
                     ClaimPk = pubKeyHex,
@@ -523,16 +523,24 @@ public class SwapService(
         return null;
     }
 
-    private static readonly HashSet<string> EvmChains = new(StringComparer.OrdinalIgnoreCase)
-        { "polygon", "ethereum", "arbitrum" };
+    // EVM chain IDs as returned by the v2 /tokens API
+    private static readonly HashSet<string> EvmChainIds = new(StringComparer.OrdinalIgnoreCase)
+        { "137", "1", "42161" };
 
-    private static long ChainNameToId(string chainName) => chainName?.ToLowerInvariant() switch
+    // Chain identifiers can be names ("Lightning", "Bitcoin", "Arkade") or numeric IDs ("137", "1", "42161")
+    private static long ParseEvmChainId(string chain) => chain?.ToLowerInvariant() switch
     {
-        "polygon" => 137,
-        "ethereum" => 1,
-        "arbitrum" => 42161,
-        _ => throw new ArgumentException($"Unknown EVM chain: {chainName}")
+        "137" or "polygon" => 137,
+        "1" or "ethereum" => 1,
+        "42161" or "arbitrum" => 42161,
+        _ => long.TryParse(chain, out var id) ? id : throw new ArgumentException($"Unknown EVM chain: {chain}")
     };
+
+    private static bool IsEvmChain(string chain) =>
+        EvmChainIds.Contains(chain) ||
+        string.Equals(chain, "polygon", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(chain, "ethereum", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(chain, "arbitrum", StringComparison.OrdinalIgnoreCase);
 
     private static SwapType? MapToSwapType(string sourceChain, string targetChain)
     {
@@ -545,9 +553,9 @@ public class SwapService(
         {
             ("lightning", "arkade") => SwapType.LightningToArkade,
             ("bitcoin", "arkade") => SwapType.BitcoinToArkade,
-            ("lightning", _) when EvmChains.Contains(tgt) => SwapType.LightningToEvm,
-            (_, "lightning") when EvmChains.Contains(src) => SwapType.EvmToLightning,
-            (_, "bitcoin") when EvmChains.Contains(src) => SwapType.EvmToBitcoin,
+            ("lightning", _) when IsEvmChain(tgt) => SwapType.LightningToEvm,
+            (_, "lightning") when IsEvmChain(src) => SwapType.EvmToLightning,
+            (_, "bitcoin") when IsEvmChain(src) => SwapType.EvmToBitcoin,
             _ => null
         };
     }

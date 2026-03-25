@@ -207,14 +207,11 @@
         'Arkade': '@Html.Raw(ViewData["DefaultArkadeAddress"])'
     };
 
-    // Chain display names
+    // Chain display names (API returns numeric IDs for EVM chains)
     var chainNames = {
-        'Polygon': 'Polygon',
-        'Ethereum': 'Ethereum',
-        'Arbitrum': 'Arbitrum',
-        'Arkade': 'Arkade',
-        'Lightning': 'Lightning',
-        'Bitcoin': 'Bitcoin'
+        '137': 'Polygon', '1': 'Ethereum', '42161': 'Arbitrum',
+        'Polygon': 'Polygon', 'Ethereum': 'Ethereum', 'Arbitrum': 'Arbitrum',
+        'Arkade': 'Arkade', 'Lightning': 'Lightning', 'Bitcoin': 'Bitcoin'
     };
 
     var sourceChainInput = document.getElementById('sourceChain');
@@ -360,7 +357,7 @@
     // v2 quote API uses source_chain/target_chain (chain names or IDs) + source_token/target_token
     // For BTC: chain = "Lightning"/"Bitcoin"/"Arkade", token = "btc"
     // For EVM: chain = "137"/"1"/"42161", token = contract address (from token_id)
-    var chainToId = { 'Polygon': '137', 'Ethereum': '1', 'Arbitrum': '42161' };
+    // chainToId not needed - API already returns numeric IDs in token data
 
     function fetchQuote() {
         var sourceChain = sourceChainInput.value; // e.g. "Lightning"
@@ -378,7 +375,7 @@
         // Convert chain names to what the v2 API expects
         var qSourceChain = sourceChain; // "Lightning", "Bitcoin" etc.
         var qSourceToken = 'btc';
-        var qTargetChain = chainToId[targetChain] || targetChain;
+        var qTargetChain = targetChain; // already numeric from API token data
         var qTargetToken = targetToken; // contract address
 
         quoteLoading.style.display = '';

@@ -192,9 +192,8 @@
     var evmTokens = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.EvmTokens));
 
     var chainNames = {
-        'Polygon': 'Polygon',
-        'Ethereum': 'Ethereum',
-        'Arbitrum': 'Arbitrum'
+        '137': 'Polygon', '1': 'Ethereum', '42161': 'Arbitrum',
+        'Polygon': 'Polygon', 'Ethereum': 'Ethereum', 'Arbitrum': 'Arbitrum'
     };
 
     var sourceChainInput = document.getElementById('sourceChain');
@@ -284,7 +283,7 @@
     updateTarget();
 
     // Quote
-    var chainToId = { 'Polygon': '137', 'Ethereum': '1', 'Arbitrum': '42161' };
+    // chainToId not needed - API already returns numeric IDs
 
     var quoteTimeout = null;
     function fetchQuote() {
@@ -300,7 +299,7 @@
 
         if (!sourceChain || !sourceToken || !targetChain || !amount || amount <= 0) return;
 
-        var qSourceChain = chainToId[sourceChain] || sourceChain;
+        var qSourceChain = sourceChain; // already numeric from API
         var qSourceToken = sourceToken; // contract address
         var qTargetChain = targetChain; // "Lightning" or "Bitcoin"
         var qTargetToken = 'btc';
