@@ -357,10 +357,11 @@
     }
 
     var quoteTimeout = null;
+    // Map chain name to BTC token_id for quote API
+    var btcTokenIdMap = { 'Lightning': 'btc_lightning', 'Bitcoin': 'btc_onchain', 'Arkade': 'btc_arkade' };
+
     function fetchQuote() {
         var sourceChain = sourceChainInput.value;
-        var sourceToken = sourceTokenInput.value;
-        var targetChain = targetChainInput.value;
         var targetToken = targetTokenInput.value;
         var amount = parseInt(amountInput.value, 10);
 
@@ -369,16 +370,17 @@
         quoteLoading.style.display = 'none';
         lastQuoteData = null;
 
-        if (!sourceChain || !targetChain || !sourceToken || !targetToken || !amount || amount <= 0) return;
+        // Build from/to token_ids
+        var from = btcTokenIdMap[sourceChain]; // e.g. 'btc_lightning'
+        var to = targetToken; // e.g. 'usdc_eth' (already a token_id from dropdown)
+        if (!from || !to || !amount || amount <= 0) return;
 
         quoteLoading.style.display = '';
 
         var url = '@Url.Action("GetQuoteApi", "UILendaSwap", new { storeId = "__STOREID__" })'.replace('__STOREID__', '@storeId');
         url += (url.indexOf('?') >= 0 ? '&' : '?') +
-            'sourceChain=' + encodeURIComponent(sourceChain) +
-            '&sourceToken=' + encodeURIComponent(sourceToken) +
-            '&targetChain=' + encodeURIComponent(targetChain) +
-            '&targetToken=' + encodeURIComponent(targetToken) +
+            'from=' + encodeURIComponent(from) +
+            '&to=' + encodeURIComponent(to) +
             '&amount=' + amount;
 
         fetch(url, { credentials: 'same-origin' })

@@ -135,19 +135,15 @@ public class LendaSwapApiClient(HttpClient httpClient)
 
     // --- Quote ---
 
+    /// <summary>
+    /// Gets a quote. Uses the actual production API format: from/to (token_ids) + base_amount.
+    /// </summary>
     public async Task<QuoteResponse> GetQuote(
-        string sourceChain, string sourceToken, string targetChain, string targetToken,
-        long? sourceAmount = null, long? targetAmount = null, CancellationToken ct = default)
+        string fromTokenId, string toTokenId, long baseAmount, CancellationToken ct = default)
     {
-        var url = $"/quote?source_chain={Uri.EscapeDataString(sourceChain)}" +
-                  $"&source_token={Uri.EscapeDataString(sourceToken)}" +
-                  $"&target_chain={Uri.EscapeDataString(targetChain)}" +
-                  $"&target_token={Uri.EscapeDataString(targetToken)}";
-
-        if (sourceAmount.HasValue)
-            url += $"&source_amount={sourceAmount.Value}";
-        else if (targetAmount.HasValue)
-            url += $"&target_amount={targetAmount.Value}";
+        var url = $"/quote?from={Uri.EscapeDataString(fromTokenId)}" +
+                  $"&to={Uri.EscapeDataString(toTokenId)}" +
+                  $"&base_amount={baseAmount}";
 
         var response = await httpClient.GetAsync(url, ct);
         await EnsureSuccess(response, ct);
