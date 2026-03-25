@@ -24,15 +24,15 @@
 
     <partial name="_StatusMessage" />
 
-    @if (!hasAnyWallet)
+    @if (!hasOnchain)
     {
         <div class="row">
             <div class="col-xl-8 col-xxl-constrain">
                 <div class="alert alert-danger mb-3">
-                    <h5 class="alert-heading mb-2">No wallet configured</h5>
+                    <h5 class="alert-heading mb-2">No onchain wallet configured</h5>
                     <p class="mb-0">
-                        Configure a <strong>Lightning node</strong> or an <strong>onchain wallet</strong>
-                        in your store's wallet settings to receive BTC via swaps.
+                        Configure an <strong>onchain wallet</strong> in your store's wallet settings to use LendaSwap.
+                        This is required for swap key derivation.
                     </p>
                 </div>
             </div>
@@ -52,34 +52,42 @@
                 <div class="form-group mb-3">
                     <label class="form-label">Receive BTC via</label>
                     <div class="d-flex flex-column gap-2" id="targetOptions">
-                        @if (hasLightning)
-                        {
-                            <label class="d-flex align-items-center gap-3 p-3 rounded border border-primary bg-primary bg-opacity-10"
-                                   style="cursor: pointer;" data-target-chain="Lightning">
-                                <input type="radio" name="targetChoice" value="Lightning"
-                                       class="form-check-input mt-0" checked
-                                       data-target-chain="Lightning" />
-                                <div class="flex-grow-1">
-                                    <span class="fw-semibold">Lightning</span>
+                        <label class="d-flex align-items-center gap-3 p-3 rounded border @(hasLightning ? "border-primary bg-primary bg-opacity-10" : "opacity-50")"
+                               style="cursor: @(hasLightning ? "pointer" : "not-allowed");" data-target-chain="Lightning">
+                            <input type="radio" name="targetChoice" value="Lightning"
+                                   class="form-check-input mt-0" @(hasLightning ? "checked" : "disabled")
+                                   data-target-chain="Lightning" />
+                            <div class="flex-grow-1">
+                                <span class="fw-semibold">Lightning</span>
+                                @if (hasLightning)
+                                {
                                     <span class="text-secondary ms-2">Instant, fully automatic</span>
-                                </div>
+                                }
+                                else
+                                {
+                                    <span class="text-danger ms-2">No Lightning node connected</span>
+                                }
+                            </div>
+                            @if (hasLightning)
+                            {
                                 <span class="badge bg-success">Recommended</span>
-                            </label>
-                        }
-                        @if (hasOnchain)
-                        {
-                            <label class="d-flex align-items-center gap-3 p-3 rounded border"
-                                   style="cursor: pointer;" data-target-chain="Bitcoin">
-                                <input type="radio" name="targetChoice" value="Bitcoin"
-                                       class="form-check-input mt-0"
-                                       data-target-chain="Bitcoin"
-                                       @(!hasLightning ? "checked" : "") />
-                                <div class="flex-grow-1">
-                                    <span class="fw-semibold">Onchain</span>
-                                    <span class="text-secondary ms-2">Requires 1 confirmation</span>
-                                </div>
-                            </label>
-                        }
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Unavailable</span>
+                            }
+                        </label>
+                        <label class="d-flex align-items-center gap-3 p-3 rounded border @(!hasLightning ? "border-primary bg-primary bg-opacity-10" : "")"
+                               style="cursor: pointer;" data-target-chain="Bitcoin">
+                            <input type="radio" name="targetChoice" value="Bitcoin"
+                                   class="form-check-input mt-0"
+                                   data-target-chain="Bitcoin"
+                                   @(!hasLightning ? "checked" : "") />
+                            <div class="flex-grow-1">
+                                <span class="fw-semibold">Onchain</span>
+                                <span class="text-secondary ms-2">Requires 1 confirmation</span>
+                            </div>
+                        </label>
                     </div>
                 </div>
 

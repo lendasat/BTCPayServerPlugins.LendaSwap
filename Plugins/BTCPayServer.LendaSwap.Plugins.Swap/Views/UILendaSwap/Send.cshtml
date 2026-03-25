@@ -25,15 +25,28 @@
 
     <partial name="_StatusMessage" />
 
-    @if (!hasAnyWallet)
+    @if (!hasOnchain)
     {
         <div class="row">
             <div class="col-xl-8 col-xxl-constrain">
                 <div class="alert alert-danger mb-3">
-                    <h5 class="alert-heading mb-2">No wallet configured</h5>
+                    <h5 class="alert-heading mb-2">No onchain wallet configured</h5>
                     <p class="mb-0">
-                        Configure a <strong>Lightning node</strong> or an <strong>onchain wallet</strong>
-                        in your store's wallet settings to create swaps.
+                        Configure an <strong>onchain wallet</strong> in your store's wallet settings to use LendaSwap.
+                        This is required for swap key derivation.
+                    </p>
+                </div>
+            </div>
+        </div>
+    }
+    else if (!hasLightning)
+    {
+        <div class="row">
+            <div class="col-xl-8 col-xxl-constrain">
+                <div class="alert alert-warning mb-3">
+                    <p class="mb-0">
+                        <strong>Lightning not configured.</strong> Connect a Lightning node in your store settings
+                        to enable Lightning-based swaps. Onchain swaps are still available.
                     </p>
                 </div>
             </div>
@@ -54,11 +67,14 @@
                                style="cursor: @(hasLightning ? "pointer" : "not-allowed");"
                                data-source-chain="Lightning" data-source-token="btc">
                             <input type="radio" name="sourceChoice" value="Lightning"
-                                   class="form-check-input mt-0" checked
-                                   data-source-chain="Lightning" data-source-token="btc"
-                                   @(!hasLightning ? "disabled" : "") />
+                                   class="form-check-input mt-0" @(hasLightning ? "checked" : "disabled")
+                                   data-source-chain="Lightning" data-source-token="btc" />
                             <div class="flex-grow-1">
                                 <span class="fw-semibold">BTC (Lightning)</span>
+                                @if (!hasLightning)
+                                {
+                                    <span class="text-danger ms-2">No Lightning node connected</span>
+                                }
                             </div>
                             @if (hasLightning)
                             {
@@ -66,16 +82,15 @@
                             }
                             else
                             {
-                                <span class="badge bg-danger">Not configured</span>
+                                <span class="badge bg-secondary">Unavailable</span>
                             }
                         </label>
                         <label class="d-flex align-items-center gap-3 p-3 rounded border @(hasOnchain ? "" : "opacity-50")"
                                style="cursor: @(hasOnchain ? "pointer" : "not-allowed");"
                                data-source-chain="Bitcoin" data-source-token="btc">
                             <input type="radio" name="sourceChoice" value="Bitcoin"
-                                   class="form-check-input mt-0"
-                                   data-source-chain="Bitcoin" data-source-token="btc"
-                                   @(!hasOnchain ? "disabled" : "") />
+                                   class="form-check-input mt-0" @(!hasLightning && hasOnchain ? "checked" : "")
+                                   data-source-chain="Bitcoin" data-source-token="btc" />
                             <div class="flex-grow-1">
                                 <span class="fw-semibold">BTC (Onchain)</span>
                             </div>
