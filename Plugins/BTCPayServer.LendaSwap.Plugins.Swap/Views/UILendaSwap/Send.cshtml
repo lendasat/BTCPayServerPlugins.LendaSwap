@@ -417,7 +417,7 @@
 
     function debouncedFetchQuote() {
         if (quoteTimeout) clearTimeout(quoteTimeout);
-        quoteTimeout = setTimeout(fetchQuote, 400);
+        quoteTimeout = setTimeout(fetchQuote, 1500);
     }
 
     amountInput.addEventListener('input', debouncedFetchQuote);
