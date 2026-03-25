@@ -195,6 +195,7 @@
 (function () {
     var btcTokens = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.BtcTokens));
     var evmTokens = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.EvmTokens));
+    console.log('LendaSwap Send: btcTokens=' + btcTokens.length + ', evmTokens=' + evmTokens.length);
 
     var walletStatus = {
         'Lightning': @(hasLightning ? "true" : "false"),
@@ -236,8 +237,9 @@
     var claimDestination = document.getElementById('claimDestination');
     var sendForm = document.getElementById('sendForm');
 
-    // Confirmation modal elements
-    var confirmModal = new bootstrap.Modal(document.getElementById('confirmModal'));
+    // Confirmation modal elements (bootstrap may load later)
+    var confirmModalEl = document.getElementById('confirmModal');
+    var confirmModal = null;
     var confirmSend = document.getElementById('confirmSend');
     var confirmReceive = document.getElementById('confirmReceive');
     var confirmFees = document.getElementById('confirmFees');
@@ -337,10 +339,21 @@
         debouncedFetchQuote();
     });
 
-    // Initialize
+    // Initialize: select first available source and populate targets
     var initialChecked = document.querySelector('input[name="sourceChoice"]:checked');
+    if (!initialChecked) {
+        // No radio checked — try to check the first non-disabled one
+        var firstAvailable = document.querySelector('input[name="sourceChoice"]:not(:disabled)');
+        if (firstAvailable) {
+            firstAvailable.checked = true;
+            initialChecked = firstAvailable;
+        }
+    }
     if (initialChecked) {
         updateSelection(initialChecked.dataset.sourceChain);
+    } else {
+        // No wallet at all — still populate targets so user can see what's available
+        populateTargetSelect('Lightning');
     }
 
     var quoteTimeout = null;
@@ -442,11 +455,12 @@
         confirmReceive.textContent = lastQuoteData && lastQuoteData.targetAmount ? lastQuoteData.targetAmount : '\u2014';
         confirmDest.textContent = claimDestination.value;
 
-        confirmModal.show();
+        if (!confirmModal && typeof bootstrap !== 'undefined') confirmModal = new bootstrap.Modal(confirmModalEl);
+        if (confirmModal) confirmModal.show();
     });
 
     confirmSendBtn.addEventListener('click', function () {
-        confirmModal.hide();
+        if (confirmModal) confirmModal.hide();
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Creating swap...';
         sendForm.submit();

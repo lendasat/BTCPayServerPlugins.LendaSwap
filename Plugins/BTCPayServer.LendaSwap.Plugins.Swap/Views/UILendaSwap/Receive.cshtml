@@ -214,7 +214,8 @@
     var receiveForm = document.getElementById('receiveForm');
     var targetRadios = document.querySelectorAll('input[name="targetChoice"]');
 
-    var confirmModal = new bootstrap.Modal(document.getElementById('confirmModal'));
+    var confirmModalEl = document.getElementById('confirmModal');
+    var confirmModal = null;
     var confirmSend = document.getElementById('confirmSend');
     var confirmReceive = document.getElementById('confirmReceive');
     var confirmFees = document.getElementById('confirmFees');
@@ -240,6 +241,7 @@
     }
 
     populateSourceSelect();
+    console.log('LendaSwap Receive: evmTokens=' + evmTokens.length + ', sourceSelect options=' + sourceSelect.options.length);
 
     // Target selection
     function updateTarget() {
@@ -354,11 +356,12 @@
         confirmSender.textContent = claimDestination.value;
         confirmVia.textContent = targetChainInput.value;
 
-        confirmModal.show();
+        if (!confirmModal && typeof bootstrap !== 'undefined') confirmModal = new bootstrap.Modal(confirmModalEl);
+        if (confirmModal) confirmModal.show();
     });
 
     confirmBtn.addEventListener('click', function () {
-        confirmModal.hide();
+        if (confirmModal) confirmModal.hide();
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Creating swap...';
         receiveForm.submit();
