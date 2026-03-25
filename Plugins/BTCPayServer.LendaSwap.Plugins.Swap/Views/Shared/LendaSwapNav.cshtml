@@ -24,6 +24,10 @@
                    text-translate="true">Send</a>
             </li>
             <li class="nav-item nav-item-sub">
+                <a layout-menu-item="@nameof(LendaSwapNavPages.Receive)" asp-controller="UILendaSwap" asp-action="Receive" asp-route-storeId="@storeId"
+                   text-translate="true">Receive</a>
+            </li>
+            <li class="nav-item nav-item-sub">
                 <a layout-menu-item="@nameof(LendaSwapNavPages.Swaps)" asp-controller="UILendaSwap" asp-action="SwapList" asp-route-storeId="@storeId"
                    text-translate="true">Swaps</a>
             </li>

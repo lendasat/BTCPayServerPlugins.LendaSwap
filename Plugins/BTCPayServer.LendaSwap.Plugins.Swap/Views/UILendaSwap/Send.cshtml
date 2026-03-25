@@ -92,8 +92,7 @@
                                 <span class="badge bg-danger">Not configured</span>
                             }
                         </label>
-                        @* EVM source options are generated dynamically by JS below *@
-                        <div id="evmSourceOptions"></div>
+                        @* EVM→BTC flows are on the Receive page *@
                     </div>
                 </div>
 
@@ -232,16 +231,10 @@
 
     var lastQuoteData = null;
 
-    // Check if a source chain is an EVM chain
-    function isEvmSource(chain) {
-        return chain === 'Polygon' || chain === 'Ethereum' || chain === 'Arbitrum';
-    }
-
-    // Determine valid targets for a given source chain + token
-    function getValidTargets(sourceChain, sourceToken) {
+    // Send page: BTC → EVM/Arkade only. EVM→BTC flows are on the Receive page.
+    function getValidTargets(sourceChain) {
         var targets = [];
         if (sourceChain === 'Lightning' || sourceChain === 'Bitcoin') {
-            // BTC→EVM/Arkade: Can target EVM chains and Arkade
             evmTokens.forEach(function (t) {
                 targets.push({
                     chain: t.chain,
@@ -256,28 +249,12 @@
                 label: 'BTC (Arkade)',
                 symbol: 'BTC'
             });
-        } else if (isEvmSource(sourceChain)) {
-            // EVM→BTC: Can target Lightning or Bitcoin onchain
-            if (walletStatus['Lightning']) {
-                targets.push({
-                    chain: 'Lightning',
-                    token: 'btc',
-                    label: 'BTC (Lightning) — fully automatic',
-                    symbol: 'BTC'
-                });
-            }
-            targets.push({
-                chain: 'Bitcoin',
-                token: 'btc',
-                label: 'BTC (Onchain)',
-                symbol: 'BTC'
-            });
         }
         return targets;
     }
 
-    function populateTargetSelect(sourceChain, sourceToken) {
-        var targets = getValidTargets(sourceChain, sourceToken);
+    function populateTargetSelect(sourceChain) {
+        var targets = getValidTargets(sourceChain);
         targetSelect.innerHTML = '<option value="" data-chain="" data-token="">-- Select target --</option>';
         targets.forEach(function (t) {
             var opt = document.createElement('option');
@@ -290,15 +267,7 @@
     }
 
     function updateDestinationUI(targetChain) {
-        var srcChain = sourceChainInput.value;
-        if (isEvmSource(srcChain)) {
-            // EVM→BTC: ask for the EVM address that will fund the HTLC
-            destinationTitle.textContent = 'Your EVM Wallet';
-            destinationLabel.textContent = 'Your EVM Address (sender)';
-            destinationHint.textContent = 'The EVM address (0x...) from which you will fund the swap. BTC will be received by your store automatically.';
-            claimDestination.placeholder = '0x...';
-            claimDestination.value = defaultAddresses['evm'] || '';
-        } else if (targetChain === 'Arkade') {
+        if (targetChain === 'Arkade') {
             destinationTitle.textContent = 'Receive BTC (Arkade)';
             destinationLabel.textContent = 'Arkade Destination Address';
             destinationHint.textContent = 'Arkade address where you will receive BTC.';
@@ -314,65 +283,19 @@
         }
     }
 
-    // Dynamically add EVM tokens as source options
-    var evmSourceContainer = document.getElementById('evmSourceOptions');
-    // Group EVM tokens by chain to avoid duplicates per chain
-    var seenChains = {};
-    evmTokens.forEach(function (t) {
-        var key = t.chain + '|' + t.token_id;
-        if (seenChains[key]) return;
-        seenChains[key] = true;
-
-        var label = document.createElement('label');
-        label.className = 'd-flex align-items-center gap-3 p-3 rounded border';
-        label.style.cursor = 'pointer';
-        label.dataset.sourceChain = t.chain;
-        label.dataset.sourceToken = t.token_id;
-
-        var radio = document.createElement('input');
-        radio.type = 'radio';
-        radio.name = 'sourceChoice';
-        radio.value = t.chain + '|' + t.token_id;
-        radio.className = 'form-check-input mt-0';
-        radio.dataset.sourceChain = t.chain;
-        radio.dataset.sourceToken = t.token_id;
-
-        var div = document.createElement('div');
-        div.className = 'flex-grow-1';
-        var span = document.createElement('span');
-        span.className = 'fw-semibold';
-        span.textContent = t.symbol + ' (' + (chainNames[t.chain] || t.chain) + ')';
-        div.appendChild(span);
-
-        var badge = document.createElement('span');
-        badge.className = 'badge bg-primary';
-        badge.textContent = 'Receive BTC';
-
-        label.appendChild(radio);
-        label.appendChild(div);
-        label.appendChild(badge);
-        evmSourceContainer.appendChild(label);
-
-        radio.addEventListener('change', function () {
-            updateSelection(this.dataset.sourceChain, this.dataset.sourceToken);
-        });
-    });
-
     function updateSubmitButton() {
         var sourceChain = sourceChainInput.value;
         var targetChain = targetChainInput.value;
-        // For BTC sources, need wallet config. For EVM sources, always available.
-        var available = isEvmSource(sourceChain) || (walletStatus[sourceChain] || false);
+        var available = walletStatus[sourceChain] || false;
         submitBtn.disabled = !available || !targetChain;
     }
 
-    function updateSelection(sourceChain, sourceToken) {
+    function updateSelection(sourceChain) {
         sourceChainInput.value = sourceChain;
-        sourceTokenInput.value = sourceToken || 'btc';
+        sourceTokenInput.value = 'btc';
 
         document.querySelectorAll('#sourceOptions label').forEach(function (label) {
-            var isSelected = label.dataset.sourceChain === sourceChain &&
-                (!sourceToken || !label.dataset.sourceToken || label.dataset.sourceToken === sourceToken);
+            var isSelected = label.dataset.sourceChain === sourceChain;
             if (isSelected) {
                 label.classList.add('border-primary', 'bg-primary', 'bg-opacity-10');
             } else {
@@ -380,13 +303,13 @@
             }
         });
 
-        populateTargetSelect(sourceChain, sourceToken);
+        populateTargetSelect(sourceChain);
         updateSubmitButton();
     }
 
     radios.forEach(function (radio) {
         radio.addEventListener('change', function () {
-            updateSelection(this.dataset.sourceChain, this.dataset.sourceToken);
+            updateSelection(this.dataset.sourceChain);
         });
     });
 
@@ -402,7 +325,7 @@
     // Initialize
     var initialChecked = document.querySelector('input[name="sourceChoice"]:checked');
     if (initialChecked) {
-        updateSelection(initialChecked.dataset.sourceChain, initialChecked.dataset.sourceToken);
+        updateSelection(initialChecked.dataset.sourceChain);
     }
 
     var quoteTimeout = null;

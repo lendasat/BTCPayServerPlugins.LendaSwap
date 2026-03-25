@@ -192,6 +192,100 @@ public class UILendaSwapController(
         return RedirectToAction(nameof(SwapDetail), new { storeId, swapId = swap.Id });
     }
 
+    [HttpGet("receive")]
+    public async Task<IActionResult> Receive(string storeId)
+    {
+        var storeSettings = await dbContextFactory.GetSettingAsync(storeId);
+
+        TokenInfosResponse tokens;
+        try
+        {
+            tokens = await apiClient.GetTokens();
+        }
+        catch
+        {
+            tokens = new TokenInfosResponse();
+        }
+
+        var (hasLightning, hasOnchain, hasHotWallet) = swapService.GetWalletStatus(CurrentStore);
+        ViewData["HasLightning"] = hasLightning;
+        ViewData["HasOnchain"] = hasOnchain;
+        ViewData["HasOnchainHotWallet"] = hasHotWallet;
+        ViewData["DefaultEvmAddress"] = storeSettings.DefaultEvmAddress ?? storeSettings.DefaultPolygonAddress ?? "";
+
+        var model = new CreateSwapViewModel
+        {
+            SourceChain = "Polygon",
+            SourceToken = "",
+            TargetChain = "Lightning",
+            TargetToken = "btc",
+            ClaimDestination = storeSettings.DefaultEvmAddress ?? storeSettings.DefaultPolygonAddress,
+            BtcTokens = tokens.BtcTokens,
+            EvmTokens = tokens.EvmTokens
+        };
+        return View(model);
+    }
+
+    [HttpPost("receive")]
+    public async Task<IActionResult> ReceiveCreate(string storeId, CreateSwapViewModel model)
+    {
+        if (CurrentStore is null)
+            return NotFound();
+
+        var (hasLightning, hasOnchain, hasHotWallet) = swapService.GetWalletStatus(CurrentStore);
+        ViewData["HasLightning"] = hasLightning;
+        ViewData["HasOnchain"] = hasOnchain;
+        ViewData["HasOnchainHotWallet"] = hasHotWallet;
+
+        try
+        {
+            var tokens = await apiClient.GetTokens();
+            model.BtcTokens = tokens.BtcTokens;
+            model.EvmTokens = tokens.EvmTokens;
+        }
+        catch
+        {
+            model.BtcTokens = new List<TokenInfo>();
+            model.EvmTokens = new List<TokenInfo>();
+        }
+
+        if (!ModelState.IsValid)
+            return View(nameof(Receive), model);
+
+        var ct = HttpContext.RequestAborted;
+
+        var (swap, createError) = await swapService.CreateSwapAsync(CurrentStore, storeId, model, ct);
+
+        if (createError != null)
+        {
+            TempData.SetStatusMessageModel(new StatusMessageModel
+            {
+                Message = createError,
+                Severity = StatusMessageModel.StatusSeverity.Error
+            });
+
+            if (swap == null)
+            {
+                ModelState.AddModelError("", createError);
+                return View(nameof(Receive), model);
+            }
+
+            return View(nameof(Receive), model);
+        }
+
+        var successMsg = swap.SwapType == SwapType.EvmToLightning
+            ? "Swap created. Fund the EVM HTLC to receive BTC on Lightning automatically."
+            : "Swap created. Fund the EVM HTLC to receive BTC onchain.";
+
+        TempData.SetStatusMessageModel(new StatusMessageModel
+        {
+            Message = successMsg,
+            Severity = StatusMessageModel.StatusSeverity.Success
+        });
+
+        return RedirectToAction(nameof(SwapDetail), new { storeId, swapId = swap.Id });
+    }
+
     [HttpGet("")]
     public async Task<IActionResult> SwapList(string storeId, SwapStatus? statusFilter, int page = 1)
     {

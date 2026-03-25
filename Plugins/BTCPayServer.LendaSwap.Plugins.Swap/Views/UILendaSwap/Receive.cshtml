@@ -1,0 +1,359 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.LendaSwap.Plugins.Swap
+@using BTCPayServer.LendaSwap.Plugins.Swap.ViewModels
+@model CreateSwapViewModel
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    Layout = "_Layout";
+    ViewData.SetLayoutModel(new LayoutModel(nameof(LendaSwapNavPages.Receive), "Receive")
+        { ActiveCategory = nameof(LendaSwapNavPages) });
+
+    var hasLightning = ViewData["HasLightning"] as bool? ?? false;
+    var hasOnchain = ViewData["HasOnchain"] as bool? ?? false;
+    var hasAnyWallet = hasLightning || hasOnchain;
+}
+
+<form method="post" asp-action="ReceiveCreate" asp-controller="UILendaSwap" asp-route-storeId="@storeId" id="receiveForm">
+    <div class="sticky-header d-flex align-items-center justify-content-between">
+        <h2>@ViewData["Title"]</h2>
+        <button type="button" class="btn btn-primary" id="submitBtn" disabled>Receive BTC</button>
+    </div>
+
+    <partial name="_StatusMessage" />
+
+    @if (!hasAnyWallet)
+    {
+        <div class="row">
+            <div class="col-xl-8 col-xxl-constrain">
+                <div class="alert alert-danger mb-3">
+                    <h5 class="alert-heading mb-2">No wallet configured</h5>
+                    <p class="mb-0">
+                        Configure a <strong>Lightning node</strong> or an <strong>onchain wallet</strong>
+                        in your store's wallet settings to receive BTC via swaps.
+                    </p>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="row">
+        <div class="col-xl-8 col-xxl-constrain">
+
+            <div class="bg-tile rounded p-4 mb-4">
+                <h4 class="mb-3">Receive BTC from stablecoins</h4>
+                <p class="text-secondary mb-3">
+                    Someone sends EVM tokens (USDC, USDT, etc.) and your store receives BTC automatically.
+                </p>
+
+                <!-- How to receive BTC -->
+                <div class="form-group mb-3">
+                    <label class="form-label">Receive BTC via</label>
+                    <div class="d-flex flex-column gap-2" id="targetOptions">
+                        @if (hasLightning)
+                        {
+                            <label class="d-flex align-items-center gap-3 p-3 rounded border border-primary bg-primary bg-opacity-10"
+                                   style="cursor: pointer;" data-target-chain="Lightning">
+                                <input type="radio" name="targetChoice" value="Lightning"
+                                       class="form-check-input mt-0" checked
+                                       data-target-chain="Lightning" />
+                                <div class="flex-grow-1">
+                                    <span class="fw-semibold">Lightning</span>
+                                    <span class="text-secondary ms-2">Instant, fully automatic</span>
+                                </div>
+                                <span class="badge bg-success">Recommended</span>
+                            </label>
+                        }
+                        @if (hasOnchain)
+                        {
+                            <label class="d-flex align-items-center gap-3 p-3 rounded border"
+                                   style="cursor: pointer;" data-target-chain="Bitcoin">
+                                <input type="radio" name="targetChoice" value="Bitcoin"
+                                       class="form-check-input mt-0"
+                                       data-target-chain="Bitcoin"
+                                       @(!hasLightning ? "checked" : "") />
+                                <div class="flex-grow-1">
+                                    <span class="fw-semibold">Onchain</span>
+                                    <span class="text-secondary ms-2">Requires 1 confirmation</span>
+                                </div>
+                            </label>
+                        }
+                    </div>
+                </div>
+
+                <!-- Source EVM chain + token -->
+                <div class="form-group mb-3">
+                    <label class="form-label">Pay with</label>
+                    <select class="form-select" id="sourceSelect">
+                        <option value="" data-chain="" data-token="">-- Select token --</option>
+                    </select>
+                </div>
+
+                <input type="hidden" asp-for="SourceChain" id="sourceChain" />
+                <input type="hidden" asp-for="SourceToken" id="sourceToken" />
+                <input type="hidden" asp-for="TargetChain" id="targetChain" />
+                <input type="hidden" asp-for="TargetToken" id="targetToken" value="btc" />
+
+                <!-- Amount in sats -->
+                <div class="form-group mb-3">
+                    <label asp-for="AmountSats" class="form-label">Amount to receive</label>
+                    <div class="input-group">
+                        <input asp-for="AmountSats" class="form-control" inputmode="numeric" placeholder="0" id="amountSats" />
+                        <span class="input-group-text">sats</span>
+                    </div>
+                    <span asp-validation-for="AmountSats" class="text-danger"></span>
+                    <div id="quoteMinMax" class="text-secondary small mt-1" style="display:none;"></div>
+                </div>
+
+                <!-- Quote info -->
+                <div id="quoteInfo" class="mb-3 p-3 rounded bg-light" style="display:none;">
+                    <div class="d-flex justify-content-between">
+                        <span class="text-secondary">They send:</span>
+                        <span class="fw-semibold" id="quoteSend">--</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span class="text-secondary">You receive:</span>
+                        <span class="fw-semibold" id="quoteReceive">--</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span class="text-secondary">Fees:</span>
+                        <span id="quoteFee">--</span>
+                    </div>
+                </div>
+                <div id="quoteError" class="text-danger small mb-3" style="display:none;"></div>
+                <div id="quoteLoading" class="text-secondary small mb-3" style="display:none;">
+                    Fetching quote...
+                </div>
+            </div>
+
+            <div class="bg-tile rounded p-4 mb-4">
+                <h4 class="mb-3">Sender's EVM Address</h4>
+                <div class="form-group">
+                    <label asp-for="ClaimDestination" class="form-label" id="destinationLabel">EVM Address</label>
+                    <input asp-for="ClaimDestination" class="form-control" id="claimDestination" placeholder="0x..." />
+                    <span asp-validation-for="ClaimDestination" class="text-danger"></span>
+                    <div class="text-secondary mt-1 small">
+                        The EVM address (0x...) that will fund the swap. After creating the swap,
+                        this address needs to send tokens to the EVM HTLC contract.
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</form>
+
+<!-- Confirmation Modal -->
+<div class="modal fade" id="confirmModal" tabindex="-1" aria-labelledby="confirmModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="confirmModalLabel">Confirm Receive Swap</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-5">They send</dt>
+                    <dd class="col-sm-7" id="confirmSend">--</dd>
+
+                    <dt class="col-sm-5">You receive</dt>
+                    <dd class="col-sm-7" id="confirmReceive">--</dd>
+
+                    <dt class="col-sm-5">Fees</dt>
+                    <dd class="col-sm-7" id="confirmFees">--</dd>
+
+                    <dt class="col-sm-5">From address</dt>
+                    <dd class="col-sm-7 text-break" id="confirmSender">--</dd>
+
+                    <dt class="col-sm-5">Receive via</dt>
+                    <dd class="col-sm-7" id="confirmVia">--</dd>
+                </dl>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmBtn">Create Swap</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var evmTokens = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.EvmTokens));
+
+    var chainNames = {
+        'Polygon': 'Polygon',
+        'Ethereum': 'Ethereum',
+        'Arbitrum': 'Arbitrum'
+    };
+
+    var sourceChainInput = document.getElementById('sourceChain');
+    var sourceTokenInput = document.getElementById('sourceToken');
+    var targetChainInput = document.getElementById('targetChain');
+    var sourceSelect = document.getElementById('sourceSelect');
+    var amountInput = document.getElementById('amountSats');
+    var submitBtn = document.getElementById('submitBtn');
+    var quoteInfo = document.getElementById('quoteInfo');
+    var quoteSend = document.getElementById('quoteSend');
+    var quoteReceive = document.getElementById('quoteReceive');
+    var quoteFee = document.getElementById('quoteFee');
+    var quoteError = document.getElementById('quoteError');
+    var quoteLoading = document.getElementById('quoteLoading');
+    var quoteMinMax = document.getElementById('quoteMinMax');
+    var claimDestination = document.getElementById('claimDestination');
+    var receiveForm = document.getElementById('receiveForm');
+    var targetRadios = document.querySelectorAll('input[name="targetChoice"]');
+
+    var confirmModal = new bootstrap.Modal(document.getElementById('confirmModal'));
+    var confirmSend = document.getElementById('confirmSend');
+    var confirmReceive = document.getElementById('confirmReceive');
+    var confirmFees = document.getElementById('confirmFees');
+    var confirmSender = document.getElementById('confirmSender');
+    var confirmVia = document.getElementById('confirmVia');
+    var confirmBtn = document.getElementById('confirmBtn');
+
+    var lastQuoteData = null;
+
+    // Populate EVM token dropdown
+    function populateSourceSelect() {
+        sourceSelect.innerHTML = '<option value="" data-chain="" data-token="">-- Select token --</option>';
+        evmTokens.forEach(function (t) {
+            // Skip WBTC (not useful for receive)
+            if (t.symbol === 'WBTC') return;
+            var opt = document.createElement('option');
+            opt.value = t.chain + '|' + t.token_id;
+            opt.dataset.chain = t.chain;
+            opt.dataset.token = t.token_id;
+            opt.textContent = t.symbol + ' on ' + (chainNames[t.chain] || t.chain);
+            sourceSelect.appendChild(opt);
+        });
+    }
+
+    populateSourceSelect();
+
+    // Target selection
+    function updateTarget() {
+        var checked = document.querySelector('input[name="targetChoice"]:checked');
+        if (checked) {
+            targetChainInput.value = checked.dataset.targetChain;
+
+            document.querySelectorAll('#targetOptions label').forEach(function (label) {
+                if (label.dataset.targetChain === checked.dataset.targetChain) {
+                    label.classList.add('border-primary', 'bg-primary', 'bg-opacity-10');
+                } else {
+                    label.classList.remove('border-primary', 'bg-primary', 'bg-opacity-10');
+                }
+            });
+        }
+        updateSubmitButton();
+        debouncedFetchQuote();
+    }
+
+    targetRadios.forEach(function (radio) {
+        radio.addEventListener('change', updateTarget);
+    });
+
+    // Source selection
+    sourceSelect.addEventListener('change', function () {
+        var selected = this.options[this.selectedIndex];
+        sourceChainInput.value = selected.dataset.chain || '';
+        sourceTokenInput.value = selected.dataset.token || '';
+        updateSubmitButton();
+        debouncedFetchQuote();
+    });
+
+    function updateSubmitButton() {
+        var hasSource = sourceChainInput.value && sourceTokenInput.value;
+        var hasTarget = targetChainInput.value;
+        submitBtn.disabled = !hasSource || !hasTarget;
+    }
+
+    // Initialize target
+    updateTarget();
+
+    // Quote
+    var quoteTimeout = null;
+    function fetchQuote() {
+        var sourceChain = sourceChainInput.value;
+        var sourceToken = sourceTokenInput.value;
+        var targetChain = targetChainInput.value;
+        var amount = parseInt(amountInput.value, 10);
+
+        quoteInfo.style.display = 'none';
+        quoteError.style.display = 'none';
+        quoteLoading.style.display = 'none';
+        lastQuoteData = null;
+
+        if (!sourceChain || !sourceToken || !targetChain || !amount || amount <= 0) return;
+
+        quoteLoading.style.display = '';
+
+        var url = '@Url.Action("GetQuoteApi", "UILendaSwap", new { storeId = "__STOREID__" })'.replace('__STOREID__', '@storeId');
+        url += (url.indexOf('?') >= 0 ? '&' : '?') +
+            'sourceChain=' + encodeURIComponent(sourceChain) +
+            '&sourceToken=' + encodeURIComponent(sourceToken) +
+            '&targetChain=' + encodeURIComponent(targetChain) +
+            '&targetToken=btc' +
+            '&amount=' + amount;
+
+        fetch(url, { credentials: 'same-origin' })
+            .then(function (r) {
+                if (!r.ok) return r.json().then(function (d) { throw new Error(d.error || 'Quote failed'); });
+                return r.json();
+            })
+            .then(function (data) {
+                quoteLoading.style.display = 'none';
+                quoteInfo.style.display = '';
+                lastQuoteData = data;
+
+                if (data.minAmount || data.maxAmount) {
+                    quoteMinMax.style.display = '';
+                    quoteMinMax.textContent = 'Min: ' + (data.minAmount || 0).toLocaleString() + ' \u00b7 Max: ' + (data.maxAmount || 0).toLocaleString() + ' sats';
+                }
+
+                quoteSend.textContent = data.sourceAmount || '--';
+                quoteReceive.textContent = amount.toLocaleString() + ' sats';
+                var totalFees = (data.protocolFee || 0) + (data.networkFee || 0);
+                quoteFee.textContent = totalFees.toLocaleString() + ' sats';
+            })
+            .catch(function (err) {
+                quoteLoading.style.display = 'none';
+                quoteError.style.display = '';
+                quoteError.textContent = err.message || 'Failed to fetch quote';
+            });
+    }
+
+    function debouncedFetchQuote() {
+        if (quoteTimeout) clearTimeout(quoteTimeout);
+        quoteTimeout = setTimeout(fetchQuote, 400);
+    }
+
+    amountInput.addEventListener('input', debouncedFetchQuote);
+
+    // Submit
+    submitBtn.addEventListener('click', function () {
+        var amount = parseInt(amountInput.value, 10);
+        if (!amount || amount <= 0) { amountInput.focus(); return; }
+        if (!claimDestination.value) { claimDestination.focus(); return; }
+        if (!sourceChainInput.value) { sourceSelect.focus(); return; }
+
+        confirmSend.textContent = lastQuoteData && lastQuoteData.sourceAmount ? lastQuoteData.sourceAmount : '--';
+        confirmReceive.textContent = amount.toLocaleString() + ' sats';
+        var totalFees = lastQuoteData ? ((lastQuoteData.protocolFee || 0) + (lastQuoteData.networkFee || 0)) : 0;
+        confirmFees.textContent = totalFees.toLocaleString() + ' sats';
+        confirmSender.textContent = claimDestination.value;
+        confirmVia.textContent = targetChainInput.value;
+
+        confirmModal.show();
+    });
+
+    confirmBtn.addEventListener('click', function () {
+        confirmModal.hide();
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Creating swap...';
+        receiveForm.submit();
+    });
+})();
+</script>
