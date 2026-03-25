@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -142,7 +143,7 @@ public class SwapService(
                     ClaimingAddress = claimingAddress,
                     TargetAddress = model.ClaimDestination, // user's EVM receive address
                     TokenAddress = model.TargetToken,
-                    EvmChainId = long.Parse(model.TargetChain),
+                    EvmChainId = ChainNameToId(model.TargetChain),
                     Gasless = true,
                     UserId = pubKeyHex,
                     RefundPk = pubKeyHex
@@ -213,7 +214,7 @@ public class SwapService(
                     var result = await apiClient.CreateEvmToLightningSwap(new EvmToLightningSwapRequest
                     {
                         LightningInvoice = invoice.bolt11,
-                        EvmChainId = long.Parse(model.SourceChain),
+                        EvmChainId = ChainNameToId(model.SourceChain),
                         TokenAddress = model.SourceToken,
                         UserAddress = model.ClaimDestination, // user's EVM address (sender)
                         UserId = pubKeyHex,
@@ -241,7 +242,7 @@ public class SwapService(
                 {
                     HashLock = "0x" + paymentHash,
                     AmountOut = model.AmountSats,
-                    EvmChainId = long.Parse(model.SourceChain),
+                    EvmChainId = ChainNameToId(model.SourceChain),
                     TokenAddress = model.SourceToken,
                     UserAddress = model.ClaimDestination, // user's EVM address (sender)
                     ClaimPk = pubKeyHex,
@@ -522,21 +523,31 @@ public class SwapService(
         return null;
     }
 
+    private static readonly HashSet<string> EvmChains = new(StringComparer.OrdinalIgnoreCase)
+        { "polygon", "ethereum", "arbitrum" };
+
+    private static long ChainNameToId(string chainName) => chainName?.ToLowerInvariant() switch
+    {
+        "polygon" => 137,
+        "ethereum" => 1,
+        "arbitrum" => 42161,
+        _ => throw new ArgumentException($"Unknown EVM chain: {chainName}")
+    };
+
     private static SwapType? MapToSwapType(string sourceChain, string targetChain)
     {
         var src = sourceChain?.ToLowerInvariant();
         var tgt = targetChain?.ToLowerInvariant();
 
+        if (src == null || tgt == null) return null;
+
         return (src, tgt) switch
         {
             ("lightning", "arkade") => SwapType.LightningToArkade,
             ("bitcoin", "arkade") => SwapType.BitcoinToArkade,
-            // Lightning → any EVM chain
-            ("lightning", "137" or "1" or "42161") => SwapType.LightningToEvm,
-            // Any EVM chain → Lightning
-            ("137" or "1" or "42161", "lightning") => SwapType.EvmToLightning,
-            // Any EVM chain → Bitcoin onchain
-            ("137" or "1" or "42161", "bitcoin") => SwapType.EvmToBitcoin,
+            ("lightning", _) when EvmChains.Contains(tgt) => SwapType.LightningToEvm,
+            (_, "lightning") when EvmChains.Contains(src) => SwapType.EvmToLightning,
+            (_, "bitcoin") when EvmChains.Contains(src) => SwapType.EvmToBitcoin,
             _ => null
         };
     }

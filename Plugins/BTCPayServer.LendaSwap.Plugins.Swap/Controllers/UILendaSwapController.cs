@@ -96,7 +96,7 @@ public class UILendaSwapController(
         {
             SourceChain = "Lightning",
             SourceToken = "btc",
-            TargetChain = "137",
+            TargetChain = "Polygon",
             TargetToken = "",
             ClaimDestination = storeSettings.DefaultEvmAddress ?? storeSettings.DefaultPolygonAddress,
             BtcTokens = tokens.BtcTokens,

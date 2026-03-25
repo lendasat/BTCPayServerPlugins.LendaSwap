@@ -192,12 +192,14 @@
         'Arkade': '@Html.Raw(ViewData["DefaultArkadeAddress"])'
     };
 
-    // Chain name mapping
+    // Chain display names
     var chainNames = {
-        '137': 'Polygon',
-        '1': 'Ethereum',
-        '42161': 'Arbitrum',
-        'Arkade': 'Arkade'
+        'Polygon': 'Polygon',
+        'Ethereum': 'Ethereum',
+        'Arbitrum': 'Arbitrum',
+        'Arkade': 'Arkade',
+        'Lightning': 'Lightning',
+        'Bitcoin': 'Bitcoin'
     };
 
     var sourceChainInput = document.getElementById('sourceChain');
@@ -230,9 +232,9 @@
 
     var lastQuoteData = null;
 
-    // Check if a source chain is an EVM chain ID
+    // Check if a source chain is an EVM chain
     function isEvmSource(chain) {
-        return chain === '137' || chain === '1' || chain === '42161';
+        return chain === 'Polygon' || chain === 'Ethereum' || chain === 'Arbitrum';
     }
 
     // Determine valid targets for a given source chain + token

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -121,7 +122,15 @@ public class LendaSwapApiClient(HttpClient httpClient)
         var response = await httpClient.GetAsync("/tokens", ct);
         await EnsureSuccess(response, ct);
         var json = await response.Content.ReadAsStringAsync(ct);
-        return JsonConvert.DeserializeObject<TokenInfosResponse>(json);
+
+        // API returns a flat array of TokenInfo. Split into btc/evm categories.
+        var allTokens = JsonConvert.DeserializeObject<List<TokenInfo>>(json) ?? new List<TokenInfo>();
+        var btcChains = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Lightning", "Bitcoin", "Arkade" };
+        return new TokenInfosResponse
+        {
+            BtcTokens = allTokens.Where(t => btcChains.Contains(t.Chain ?? "")).ToList(),
+            EvmTokens = allTokens.Where(t => !btcChains.Contains(t.Chain ?? "")).ToList()
+        };
     }
 
     // --- Quote ---
