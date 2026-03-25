@@ -400,13 +400,19 @@
                     quoteMinMax.textContent = 'Min: ' + (data.minAmount || 0).toLocaleString() + ' \u00b7 Max: ' + (data.maxAmount || 0).toLocaleString() + ' sats';
                 }
 
-                if (data.targetAmount) {
-                    quoteReceive.textContent = 'You receive: \u2248 ' + data.targetAmount;
+                var totalFeeSats = (data.protocolFee || 0) + (data.networkFee || 0);
+                var rate = parseFloat(data.exchangeRate);
+                var satsAmount = parseInt(amountInput.value, 10);
+                var netSats = satsAmount - totalFeeSats;
+                if (netSats < 0) netSats = 0;
+
+                if (!isNaN(rate) && rate > 0 && netSats > 0) {
+                    var receiveVal = (netSats / 100000000) * rate;
+                    quoteReceive.textContent = 'You receive: \u2248 ' + receiveVal.toFixed(2) + ' ' + (targetTokenInput.value || '');
                 } else {
                     quoteReceive.textContent = '';
                 }
-                var totalFeeSats = (data.protocolFee || 0) + (data.networkFee || 0) + (data.gaslessNetworkFee || 0);
-                quoteFee.textContent = 'Fee: ' + totalFeeSats.toLocaleString() + ' sats';
+                quoteFee.textContent = 'Fee: ' + totalFeeSats.toLocaleString() + ' sats (' + ((data.protocolFeeRate || 0) * 100).toFixed(2) + '%)';
             })
             .catch(function (err) {
                 quoteLoading.style.display = 'none';

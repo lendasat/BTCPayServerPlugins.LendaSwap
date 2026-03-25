@@ -325,10 +325,20 @@
                     quoteMinMax.textContent = 'Min: ' + (data.minAmount || 0).toLocaleString() + ' \u00b7 Max: ' + (data.maxAmount || 0).toLocaleString() + ' sats';
                 }
 
-                quoteSend.textContent = data.sourceAmount || '--';
-                quoteReceive.textContent = amount.toLocaleString() + ' sats';
                 var totalFees = (data.protocolFee || 0) + (data.networkFee || 0);
-                quoteFee.textContent = totalFees.toLocaleString() + ' sats';
+                var rate = parseFloat(data.exchangeRate);
+                var totalSats = amount + totalFees;
+
+                if (!isNaN(rate) && rate > 0) {
+                    var sendVal = (totalSats / 100000000) * rate;
+                    var selectedOpt = sourceSelect.options[sourceSelect.selectedIndex];
+                    var tokenLabel = selectedOpt ? selectedOpt.textContent : '';
+                    quoteSend.textContent = '\u2248 ' + sendVal.toFixed(2) + ' ' + tokenLabel;
+                } else {
+                    quoteSend.textContent = '--';
+                }
+                quoteReceive.textContent = amount.toLocaleString() + ' sats';
+                quoteFee.textContent = totalFees.toLocaleString() + ' sats (' + ((data.protocolFeeRate || 0) * 100).toFixed(2) + '%)';
             })
             .catch(function (err) {
                 quoteLoading.style.display = 'none';
