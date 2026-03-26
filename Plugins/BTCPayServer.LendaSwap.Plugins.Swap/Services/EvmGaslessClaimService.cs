@@ -9,18 +9,16 @@ using BTCPayServer.Services.Invoices;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
+using NBitcoin.Secp256k1;
 using NBXplorer;
-using Nethereum.Signer;
 using Nethereum.Util;
 
 namespace BTCPayServer.LendaSwap.Plugins.Swap.Services;
 
 /// <summary>
-/// Handles gasless EVM HTLC claims for Lightning→EVM swaps.
-///
-/// The claiming_address is derived from the store's BTC wallet seed via m/44'/60'/0'/0/0.
-/// The plugin signs the EIP-712 Redeem message and calls claim-gasless.
-/// The user does NOT need an EVM wallet — the server pays gas.
+/// Handles gasless EVM HTLC claims for BTC→EVM swaps.
+/// Uses NBitcoin.Secp256k1 for ECDSA signing (Nethereum's signer has BouncyCastle conflicts).
+/// Nethereum.Util is used only for Keccak-256 hashing.
 /// </summary>
 public class EvmGaslessClaimService(
     BTCPayNetworkProvider networkProvider,
@@ -34,10 +32,9 @@ public class EvmGaslessClaimService(
         dataProtectionProvider.CreateProtector("LendaSwap.Preimage");
 
     /// <summary>
-    /// Derives an Ethereum address and private key from the store's BTC wallet seed.
-    /// Uses HD path m/44'/60'/0'/0/0 (standard Ethereum BIP44 path).
+    /// Derives an Ethereum address and private key bytes from the store's BTC wallet seed.
     /// </summary>
-    public async Task<(EthECKey evmKey, string evmAddress)?> DeriveEvmKey(
+    public async Task<(byte[] privateKey, string evmAddress)?> DeriveEvmKey(
         StoreData store, CancellationToken ct)
     {
         var network = networkProvider.GetNetwork<BTCPayNetwork>("BTC");
@@ -51,17 +48,21 @@ public class EvmGaslessClaimService(
         if (extKeyStr == null)
             return null;
 
-        // Parse the BTC account key and derive the Ethereum key at m/44'/60'/0'/0/0
-        // We use the raw private key bytes — secp256k1 is the same curve for BTC and ETH
         var accountKey = ExtKey.Parse(extKeyStr, network.NBitcoinNetwork);
-        // Derive a deterministic key for EVM signing (using a sub-path from the account key)
         var evmDerivedKey = accountKey.Derive(new KeyPath("0/0"));
         var privateKeyBytes = evmDerivedKey.PrivateKey.ToBytes();
 
-        var ethKey = new EthECKey(privateKeyBytes, true);
-        var evmAddress = ethKey.GetPublicAddress();
+        // Compute Ethereum address: keccak256(uncompressed_pubkey[1:])[12:]
+        var ecPriv = ECPrivKey.Create(privateKeyBytes);
+        var pubKey = ecPriv.CreatePubKey();
+        var pubBytes = new byte[65];
+        pubKey.WriteToSpan(false, pubBytes, out _);
 
-        return (ethKey, evmAddress);
+        var sha3 = new Sha3Keccack();
+        var addrHash = sha3.CalculateHash(pubBytes.AsSpan().Slice(1).ToArray());
+        var evmAddress = "0x" + Convert.ToHexString(addrHash.AsSpan().Slice(12)).ToLower();
+
+        return (privateKeyBytes, evmAddress);
     }
 
     /// <summary>
@@ -75,7 +76,6 @@ public class EvmGaslessClaimService(
 
     /// <summary>
     /// Claims an EVM HTLC gaslessly by signing an EIP-712 Redeem message.
-    /// The server executes redeemAndExecute on behalf of the plugin.
     /// </summary>
     public async Task<(bool success, string txHash, string error)> TryGaslessClaim(
         StoreData store, SwapRecord swap, GetSwapResponse remote, CancellationToken ct)
@@ -83,7 +83,6 @@ public class EvmGaslessClaimService(
         if (swap.SwapType is not (SwapType.LightningToEvm or SwapType.LightningToUsdc or SwapType.BitcoinToEvm))
             return (false, null, "Not a BTC→EVM swap.");
 
-        // We need the remote to be in ServerFunded state with EVM HTLC details
         if (string.IsNullOrEmpty(remote.EvmHtlcAddress) ||
             !remote.EvmChainId.HasValue ||
             !remote.EvmRefundLocktime.HasValue ||
@@ -95,7 +94,6 @@ public class EvmGaslessClaimService(
             return (false, null, "EVM HTLC details not yet available.");
         }
 
-        // Decrypt the preimage
         string preimageHex;
         try
         {
@@ -106,22 +104,19 @@ public class EvmGaslessClaimService(
             return (false, null, "Failed to decrypt preimage.");
         }
 
-        // Derive EVM key
         var keyResult = await DeriveEvmKey(store, ct);
         if (keyResult == null)
             return (false, null, "Could not derive EVM key from store wallet.");
 
-        var (ethKey, claimingAddress) = keyResult.Value;
+        var (privateKeyBytes, claimingAddress) = keyResult.Value;
 
-        // Verify our claiming address matches what's stored in the swap
         if (!string.IsNullOrEmpty(remote.ClientEvmAddress) &&
             !string.Equals(claimingAddress, remote.ClientEvmAddress, StringComparison.OrdinalIgnoreCase))
         {
             return (false, null, $"Claiming address mismatch: ours={claimingAddress}, expected={remote.ClientEvmAddress}");
         }
 
-        // Step 1: Fetch calldata from the API
-        var destination = swap.ClaimDestination; // user's actual EVM destination
+        var destination = swap.ClaimDestination;
         RedeemAndSwapCalldataResponse calldata;
         try
         {
@@ -132,19 +127,15 @@ public class EvmGaslessClaimService(
             return (false, null, $"Failed to fetch calldata: {ex.Message}");
         }
 
-        // Step 2: Determine sweep token and minAmountOut
-        // For non-WBTC targets, use the target token. For WBTC, use WBTC address.
         var wbtcAddress = remote.WbtcAddress;
-        var sweepToken = wbtcAddress; // default: WBTC direct
+        var sweepToken = wbtcAddress;
         var minAmountOut = BigInteger.Zero;
 
-        // If there's DEX calldata, the target is not WBTC — use the actual target token
         if (calldata.DexCalldata != null && !string.IsNullOrEmpty(swap.TargetToken))
         {
-            sweepToken = swap.TargetToken; // ERC-20 contract address of target token
+            sweepToken = swap.TargetToken;
         }
 
-        // Step 3: Construct and sign the EIP-712 Redeem message
         var preimageBytes = Convert.FromHexString(preimageHex);
         var preimage32 = new byte[32];
         Array.Copy(preimageBytes, preimage32, Math.Min(preimageBytes.Length, 32));
@@ -153,15 +144,13 @@ public class EvmGaslessClaimService(
         var amount = new BigInteger(remote.EvmExpectedSats.Value);
         var timelock = new BigInteger(remote.EvmRefundLocktime.Value);
 
-        // Parse the callsHash from the calldata response
         var callsHashHex = calldata.CallsHash;
         if (callsHashHex.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
             callsHashHex = callsHashHex[2..];
         var callsHashBytes = Convert.FromHexString(callsHashHex);
 
-        // Sign the EIP-712 Redeem struct
         var (v, r, s) = SignRedeemEip712(
-            ethKey,
+            privateKeyBytes,
             chainId: chainId,
             verifyingContract: remote.EvmHtlcAddress,
             preimage: preimage32,
@@ -176,7 +165,6 @@ public class EvmGaslessClaimService(
             callsHash: callsHashBytes
         );
 
-        // Step 4: Call claim-gasless
         try
         {
             var request = new ClaimGaslessRequest
@@ -184,8 +172,8 @@ public class EvmGaslessClaimService(
                 Secret = "0x" + preimageHex,
                 Destination = destination,
                 V = v,
-                R = "0x" + BitConverter.ToString(r).Replace("-", "").ToLowerInvariant(),
-                S = "0x" + BitConverter.ToString(s).Replace("-", "").ToLowerInvariant(),
+                R = "0x" + Convert.ToHexString(r).ToLowerInvariant(),
+                S = "0x" + Convert.ToHexString(s).ToLowerInvariant(),
                 DexCalldata = calldata.DexCalldata
             };
 
@@ -202,15 +190,10 @@ public class EvmGaslessClaimService(
     }
 
     /// <summary>
-    /// Signs the EIP-712 Redeem struct for the HTLCErc20 contract.
-    ///
-    /// Domain: { name: "HTLCErc20", version: "3", chainId, verifyingContract }
-    /// Struct: Redeem(bytes32 preimage, uint256 amount, address token, address sender,
-    ///                uint256 timelock, address caller, address destination,
-    ///                address sweepToken, uint256 minAmountOut, bytes32 callsHash)
+    /// Signs the EIP-712 Redeem struct using NBitcoin.Secp256k1.
     /// </summary>
     private static (int v, byte[] r, byte[] s) SignRedeemEip712(
-        EthECKey key,
+        byte[] privateKey,
         long chainId,
         string verifyingContract,
         byte[] preimage,
@@ -232,7 +215,7 @@ public class EvmGaslessClaimService(
         var nameHash = sha3.CalculateHash(System.Text.Encoding.UTF8.GetBytes("HTLCErc20"));
         var versionHash = sha3.CalculateHash(System.Text.Encoding.UTF8.GetBytes("3"));
 
-        var domainData = new byte[32 + 32 + 32 + 32 + 32]; // typeHash + nameHash + versionHash + chainId + contract
+        var domainData = new byte[32 * 5];
         Array.Copy(domainTypeHash, 0, domainData, 0, 32);
         Array.Copy(nameHash, 0, domainData, 32, 32);
         Array.Copy(versionHash, 0, domainData, 64, 32);
@@ -245,8 +228,7 @@ public class EvmGaslessClaimService(
             System.Text.Encoding.UTF8.GetBytes(
                 "Redeem(bytes32 preimage,uint256 amount,address token,address sender,uint256 timelock,address caller,address destination,address sweepToken,uint256 minAmountOut,bytes32 callsHash)"));
 
-        // Encode struct fields: typeHash + fields (each 32 bytes)
-        var structData = new byte[32 * 11]; // typeHash + 10 fields
+        var structData = new byte[32 * 11];
         Array.Copy(redeemTypeHash, 0, structData, 0, 32);
         Array.Copy(PadTo32(preimage), 0, structData, 32, 32);
         AbiEncodeUint256(amount).CopyTo(structData, 64);
@@ -258,10 +240,9 @@ public class EvmGaslessClaimService(
         AbiEncodeAddress(sweepToken).CopyTo(structData, 256);
         AbiEncodeUint256(minAmountOut).CopyTo(structData, 288);
         Array.Copy(PadTo32(callsHash), 0, structData, 320, 32);
-
         var structHash = sha3.CalculateHash(structData);
 
-        // Final EIP-712 digest: keccak256("\x19\x01" + domainSeparator + structHash)
+        // Final EIP-712 digest
         var digestInput = new byte[2 + 32 + 32];
         digestInput[0] = 0x19;
         digestInput[1] = 0x01;
@@ -269,14 +250,21 @@ public class EvmGaslessClaimService(
         Array.Copy(structHash, 0, digestInput, 34, 32);
         var digest = sha3.CalculateHash(digestInput);
 
-        // Sign with secp256k1 (recoverable signature)
-        var signature = key.SignAndCalculateV(digest);
+        // Sign with NBitcoin.Secp256k1 (works, unlike Nethereum's broken BouncyCastle signer)
+        var ecPrivKey = ECPrivKey.Create(privateKey);
+        ecPrivKey.TrySignRecoverable(digest, out var recSig);
 
-        // Nethereum's SignAndCalculateV returns V as 27 or 28 (EIP-155 standard).
-        // If it returns a raw recovery ID (0 or 1), we need to add 27.
-        var vRaw = signature.V.Length == 1 ? (int)signature.V[0] : BitConverter.ToInt32(signature.V);
-        var v = vRaw < 27 ? vRaw + 27 : vRaw;
-        return (v, signature.R, signature.S);
+        Scalar rScalar = default, sScalar = default;
+        int recId = 0;
+        recSig.Deconstruct(out rScalar, out sScalar, out recId);
+
+        var rBytes = new byte[32];
+        var sBytes = new byte[32];
+        rScalar.WriteToSpan(rBytes);
+        sScalar.WriteToSpan(sBytes);
+
+        var v = 27 + recId;
+        return (v, rBytes, sBytes);
     }
 
     private static byte[] AbiEncodeUint256(BigInteger value)
