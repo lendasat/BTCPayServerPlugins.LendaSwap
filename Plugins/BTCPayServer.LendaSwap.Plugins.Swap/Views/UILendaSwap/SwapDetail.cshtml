@@ -28,11 +28,12 @@
     var preimage = ViewData["Preimage"] as string;
     var isArkadeSwap = Model.SwapType is SwapType.BitcoinToArkade or SwapType.LightningToArkade;
     var isLightningSwap = Model.SwapType is SwapType.LightningToUsdc or SwapType.LightningToEvm;
-    var isEvmSwap = Model.SwapType is SwapType.LightningToEvm or SwapType.LightningToUsdc;
+    var isBtcToEvm = Model.SwapType is SwapType.LightningToEvm or SwapType.LightningToUsdc or SwapType.BitcoinToEvm;
     var isEvmToBtc = Model.SwapType is SwapType.EvmToLightning or SwapType.EvmToBitcoin;
     var needsClaim = Model.Status is SwapStatus.PendingClaim or SwapStatus.Claiming;
     var isFailed = Model.Status == SwapStatus.Failed;
     var isTerminal = Model.Status is SwapStatus.Completed or SwapStatus.Failed or SwapStatus.Expired;
+    var isProcessing = Model.Status is SwapStatus.Processing or SwapStatus.PendingClaim or SwapStatus.Claiming or SwapStatus.PayingFromWallet;
     var needsEvmFunding = isEvmToBtc && Model.Status == SwapStatus.PendingPayment && !string.IsNullOrEmpty(Model.EvmHtlcAddress);
     var needsManualPay = !isEvmToBtc && Model.Status == SwapStatus.PendingPayment && !string.IsNullOrEmpty(Model.PaymentAddress);
     var qrData = needsManualPay
@@ -62,6 +63,7 @@
                     SwapType.LightningToEvm => $"Lightning -> EVM ({Model.TargetChain})",
                     SwapType.LightningToUsdc => "Lightning -> USDC",
                     SwapType.BitcoinToArkade => "Bitcoin -> Arkade",
+                    SwapType.BitcoinToEvm => $"Bitcoin -> EVM ({Model.TargetChain})",
                     SwapType.LightningToArkade => "Lightning -> Arkade",
                     SwapType.EvmToLightning => $"EVM ({Model.SourceChain}) -> Lightning",
                     SwapType.EvmToBitcoin => $"EVM ({Model.SourceChain}) -> Bitcoin",
@@ -69,6 +71,65 @@
                 })
             </span>
         </div>
+
+        <!-- Processing spinner for active swaps -->
+        @if (isProcessing && !isTerminal)
+        {
+            var stepMessage = Model.Status switch
+            {
+                SwapStatus.PayingFromWallet => "Broadcasting onchain payment...",
+                SwapStatus.Processing => isBtcToEvm
+                    ? "BTC payment detected. Server is funding the EVM HTLC..."
+                    : isEvmToBtc
+                        ? "EVM funding detected. Server is processing..."
+                        : "Processing swap...",
+                SwapStatus.PendingClaim => isBtcToEvm
+                    ? "EVM HTLC funded. Claiming tokens gaslessly..."
+                    : isEvmToBtc
+                        ? "BTC HTLC funded. Auto-claiming BTC..."
+                        : "Waiting for claim...",
+                SwapStatus.Claiming => "Claim transaction submitted. Waiting for confirmation...",
+                _ => "Processing..."
+            };
+            <div class="alert alert-primary d-flex align-items-center gap-3 mb-4">
+                <div class="spinner-border text-primary" role="status" style="width: 2rem; height: 2rem;">
+                    <span class="visually-hidden">Processing...</span>
+                </div>
+                <div>
+                    <h5 class="mb-1">Swap in progress</h5>
+                    <p class="mb-0">@stepMessage</p>
+                    <small class="text-secondary">This page auto-refreshes every 15 seconds.</small>
+                </div>
+            </div>
+        }
+
+        @if (Model.Status == SwapStatus.Completed)
+        {
+            <div class="alert alert-success d-flex align-items-center gap-3 mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+                <div>
+                    <h5 class="mb-1">Swap completed!</h5>
+                    <p class="mb-0">
+                        @if (isBtcToEvm)
+                        {
+                            <span>Tokens have been delivered to your destination address.</span>
+                        }
+                        else if (isEvmToBtc)
+                        {
+                            <span>BTC has been received by your store.</span>
+                        }
+                        else
+                        {
+                            <span>The swap has been completed successfully.</span>
+                        }
+                    </p>
+                </div>
+            </div>
+        }
 
         <!-- EVM→BTC: Show EVM HTLC funding instructions -->
         @if (needsEvmFunding)
@@ -201,7 +262,7 @@
         }
 
         <!-- ACTION REQUIRED: EVM claim (requires user's EVM wallet) -->
-        @if (isEvmSwap && needsClaim)
+        @if (isBtcToEvm && needsClaim)
         {
             <div class="alert alert-info">
                 <h5 class="alert-heading mb-2">Pending EVM Claim</h5>
@@ -478,7 +539,7 @@
 {
     <!-- Auto-refresh every 15 seconds for active swaps -->
     <script>
-        setTimeout(function() { location.reload(); }, 15000);
+        setTimeout(function() { location.reload(); }, 8000);
     </script>
 }
 
