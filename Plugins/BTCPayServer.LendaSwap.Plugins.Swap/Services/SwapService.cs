@@ -92,8 +92,10 @@ public class SwapService(
         StoreData store, string storeId, CreateSwapViewModel model, CancellationToken ct)
     {
         var swapType = MapToSwapType(model.SourceChain, model.TargetChain);
+        logger.LogInformation("CreateSwap: SourceChain={Src}, TargetChain={Tgt}, SourceToken={ST}, TargetToken={TT}, SwapType={Type}",
+            model.SourceChain, model.TargetChain, model.SourceToken, model.TargetToken, swapType);
         if (swapType is null)
-            return (null, "Unsupported swap pair selected.");
+            return (null, $"Unsupported swap pair selected. (source={model.SourceChain}, target={model.TargetChain})");
 
         var (pubKeyHex, isEphemeral) = await GetSwapPubKeyHex(store, ct);
         if (isEphemeral)
@@ -153,6 +155,36 @@ public class SwapService(
                 swap.PaymentAddress = result.Bolt11Invoice;
                 swap.TargetHtlcAddress = result.EvmHtlcAddress;
                 swap.HtlcExpiryBlock = result.EvmRefundLocktime;
+                swap.AmountSats = long.TryParse(result.SourceAmount, out var srcAmt) ? srcAmt : model.AmountSats;
+                swap.Status = SwapStatus.PendingPayment;
+            }
+            else if (swapType == SwapType.BitcoinToEvm)
+            {
+                var paymentHash = cryptoHelper.ComputePaymentHash(preimage);
+                swap.PaymentHash = paymentHash;
+
+                // Derive claiming address for gasless EVM claim
+                var claimingAddress = await evmClaimService.GetClaimingAddress(store, ct);
+                if (string.IsNullOrEmpty(claimingAddress))
+                    throw new InvalidOperationException("Could not derive EVM claiming key from store wallet.");
+
+                var result = await apiClient.CreateBitcoinToEvmSwap(new LightningToEvmSwapRequest
+                {
+                    HashLock = "0x" + paymentHash,
+                    AmountIn = model.AmountSats,
+                    ClaimingAddress = claimingAddress,
+                    TargetAddress = model.ClaimDestination,
+                    TokenAddress = model.TargetToken,
+                    EvmChainId = ParseEvmChainId(model.TargetChain),
+                    Gasless = true,
+                    UserId = pubKeyHex,
+                    RefundPk = pubKeyHex
+                }, ct);
+
+                swap.LendaSwapId = result.Id;
+                swap.PaymentAddress = result.BtcHtlcAddress; // BTC onchain HTLC address to fund
+                swap.TargetHtlcAddress = result.EvmHtlcAddress;
+                swap.HtlcExpiryBlock = result.BtcRefundLocktime;
                 swap.AmountSats = long.TryParse(result.SourceAmount, out var srcAmt) ? srcAmt : model.AmountSats;
                 swap.Status = SwapStatus.PendingPayment;
             }
@@ -308,7 +340,7 @@ public class SwapService(
                     logger.LogWarning("Auto-pay failed for swap {SwapId}: {Error}", swap.Id, error);
                 }
             }
-            else if (swap.SwapType == SwapType.BitcoinToArkade)
+            else if (swap.SwapType is SwapType.BitcoinToArkade or SwapType.BitcoinToEvm)
             {
                 var (success, error, txId) = await PayOnchain(store, swap.PaymentAddress, swap.AmountSats, ct);
                 if (success)
@@ -554,6 +586,7 @@ public class SwapService(
             ("lightning", "arkade") => SwapType.LightningToArkade,
             ("bitcoin", "arkade") => SwapType.BitcoinToArkade,
             ("lightning", _) when IsEvmChain(tgt) => SwapType.LightningToEvm,
+            ("bitcoin", _) when IsEvmChain(tgt) => SwapType.BitcoinToEvm,
             (_, "lightning") when IsEvmChain(src) => SwapType.EvmToLightning,
             (_, "bitcoin") when IsEvmChain(src) => SwapType.EvmToBitcoin,
             _ => null

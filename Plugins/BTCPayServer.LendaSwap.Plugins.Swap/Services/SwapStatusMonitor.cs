@@ -77,7 +77,7 @@ public class SwapStatusMonitor(
                 {
                     SwapType.EvmToLightning or SwapType.EvmToBitcoin => SwapStatus.Processing,
                     // For LN→EVM, clientfunded means our LN payment arrived, server will fund EVM next
-                    SwapType.LightningToEvm or SwapType.LightningToUsdc => SwapStatus.Processing,
+                    SwapType.LightningToEvm or SwapType.LightningToUsdc or SwapType.BitcoinToEvm => SwapStatus.Processing,
                     _ => SwapStatus.PendingPayment
                 };
                 break;
@@ -102,7 +102,7 @@ public class SwapStatusMonitor(
                         }
                         break;
 
-                    case SwapType.LightningToEvm or SwapType.LightningToUsdc:
+                    case SwapType.LightningToEvm or SwapType.LightningToUsdc or SwapType.BitcoinToEvm:
                         // Server funded EVM HTLC → auto-claim gaslessly!
                         // FIX: Set Claiming BEFORE attempt to prevent race condition
                         if (swap.Status is not (SwapStatus.Claiming or SwapStatus.Completed))

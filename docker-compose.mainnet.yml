@@ -27,8 +27,9 @@ services:
         whitelist=0.0.0.0/0
         zmqpubrawblock=tcp://0.0.0.0:28332
         zmqpubrawtx=tcp://0.0.0.0:28333
-        dbcache=1024
-        maxconnections=20
+        dbcache=6144
+        par=6
+        maxconnections=40
     ports:
       - "43782:43782"
       - "8333:8333"

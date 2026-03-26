@@ -58,6 +58,16 @@ public class LendaSwapApiClient(HttpClient httpClient)
         return JsonConvert.DeserializeObject<LightningToEvmSwapResponse>(json);
     }
 
+    public async Task<EvmToBitcoinSwapResponse> CreateBitcoinToEvmSwap(
+        LightningToEvmSwapRequest request, CancellationToken ct = default)
+    {
+        // Same request structure as Lightning→EVM but different endpoint + response has btc_htlc_address
+        var response = await httpClient.PostAsync("/swap/bitcoin/evm", ToJsonContent(request), ct);
+        await EnsureSuccess(response, ct);
+        var json = await response.Content.ReadAsStringAsync(ct);
+        return JsonConvert.DeserializeObject<EvmToBitcoinSwapResponse>(json);
+    }
+
     public async Task<BtcToArkadeSwapResponse> CreateBitcoinToArkadeSwap(
         BitcoinToArkadeSwapRequest request, CancellationToken ct = default)
     {

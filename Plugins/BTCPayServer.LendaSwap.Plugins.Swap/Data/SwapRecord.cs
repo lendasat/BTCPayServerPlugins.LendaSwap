@@ -108,6 +108,7 @@ public enum SwapType
     BitcoinToArkade,
     LightningToEvm,
     LightningToArkade,
+    BitcoinToEvm,
     EvmToLightning,
     EvmToBitcoin
 }
