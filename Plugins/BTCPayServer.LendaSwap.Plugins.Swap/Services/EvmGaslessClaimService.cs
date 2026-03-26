@@ -80,8 +80,8 @@ public class EvmGaslessClaimService(
     public async Task<(bool success, string txHash, string error)> TryGaslessClaim(
         StoreData store, SwapRecord swap, GetSwapResponse remote, CancellationToken ct)
     {
-        if (swap.SwapType is not (SwapType.LightningToEvm or SwapType.LightningToUsdc))
-            return (false, null, "Not a Lightning→EVM swap.");
+        if (swap.SwapType is not (SwapType.LightningToEvm or SwapType.LightningToUsdc or SwapType.BitcoinToEvm))
+            return (false, null, "Not a BTC→EVM swap.");
 
         // We need the remote to be in ServerFunded state with EVM HTLC details
         if (string.IsNullOrEmpty(remote.EvmHtlcAddress) ||
