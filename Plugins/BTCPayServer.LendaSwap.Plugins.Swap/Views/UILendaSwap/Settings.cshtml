@@ -50,6 +50,18 @@
                     Default EVM address for receiving tokens on Polygon, Ethereum, or Arbitrum. Overrides the Polygon-specific address above.
                 </div>
             </div>
+
+            <h4 class="mb-3 mt-4">API Configuration</h4>
+
+            <div class="form-group">
+                <label asp-for="ApiBaseUrl" class="form-label"></label>
+                <input asp-for="ApiBaseUrl" class="form-control" placeholder="http://localhost:3333/" />
+                <span asp-validation-for="ApiBaseUrl" class="text-danger"></span>
+                <div class="text-secondary mt-1">
+                    LendaSwap API base URL. Can also be set via the <code>LENDASWAP_API_URL</code> environment variable.
+                    Leave empty to use the default (<code>http://localhost:3333/</code>).
+                </div>
+            </div>
         </div>
     </div>
 </form>

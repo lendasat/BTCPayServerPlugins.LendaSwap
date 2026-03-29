@@ -27,8 +27,8 @@
 
     var preimage = ViewData["Preimage"] as string;
     var isArkadeSwap = Model.SwapType is SwapType.BitcoinToArkade or SwapType.LightningToArkade;
-    var isLightningSwap = Model.SwapType is SwapType.LightningToUsdc or SwapType.LightningToEvm;
-    var isBtcToEvm = Model.SwapType is SwapType.LightningToEvm or SwapType.LightningToUsdc or SwapType.BitcoinToEvm;
+    var isLightningSwap = Model.SwapType is SwapType.LightningToEvm;
+    var isBtcToEvm = Model.SwapType is SwapType.LightningToEvm or SwapType.BitcoinToEvm;
     var isEvmToBtc = Model.SwapType is SwapType.EvmToLightning or SwapType.EvmToBitcoin;
     var needsClaim = Model.Status is SwapStatus.PendingClaim or SwapStatus.Claiming;
     var isFailed = Model.Status == SwapStatus.Failed;
@@ -61,7 +61,7 @@
                 @(Model.SwapType switch
                 {
                     SwapType.LightningToEvm => $"Lightning -> EVM ({Model.TargetChain})",
-                    SwapType.LightningToUsdc => "Lightning -> USDC",
+                    SwapType.LightningToUsdc => "Lightning -> EVM (legacy)",
                     SwapType.BitcoinToArkade => "Bitcoin -> Arkade",
                     SwapType.BitcoinToEvm => $"Bitcoin -> EVM ({Model.TargetChain})",
                     SwapType.LightningToArkade => "Lightning -> Arkade",
@@ -98,7 +98,7 @@
                 <div>
                     <h5 class="mb-1">Swap in progress</h5>
                     <p class="mb-0">@stepMessage</p>
-                    <small class="text-secondary">This page auto-refreshes every 15 seconds.</small>
+                    <small class="text-secondary">Status updates automatically every 2 seconds.</small>
                 </div>
             </div>
         }
@@ -374,7 +374,7 @@
                 <dd class="col-sm-8">@Model.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss UTC")</dd>
 
                 <dt class="col-sm-4">Updated</dt>
-                <dd class="col-sm-8">@Model.UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss UTC")</dd>
+                <dd class="col-sm-8" id="swap-updated-at">@Model.UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss UTC")</dd>
 
                 @if (!string.IsNullOrEmpty(Model.TxId))
                 {
@@ -508,6 +508,13 @@
             </dl>
         </div>
 
+        @if (ViewData["PreimageError"] is string preimageError)
+        {
+            <div class="alert alert-danger">
+                <strong>Preimage Error:</strong> @preimageError
+            </div>
+        }
+
         <!-- Emergency Recovery: Preimage -->
         @if (!string.IsNullOrEmpty(preimage))
         {
@@ -535,16 +542,9 @@
     </div>
 </div>
 
-@if (!isTerminal)
-{
-    <!-- Auto-refresh every 15 seconds for active swaps -->
-    <script>
-        setTimeout(function() { location.reload(); }, 8000);
-    </script>
-}
-
 <script>
 (function () {
+    // Clipboard buttons
     document.querySelectorAll('.clipboard-btn').forEach(function (btn) {
         btn.addEventListener('click', function () {
             var text = this.getAttribute('data-clipboard-text');
@@ -556,5 +556,38 @@
             });
         });
     });
+
+    // AJAX status polling — no full page reload
+    @if (!isTerminal)
+    {
+        <text>
+        var lastStatus = '@Model.Status.ToString()';
+        var pollInterval = 2000;
+        var statusUrl = '@Url.Action("SwapStatusJson", "UILendaSwap", new { storeId, swapId = Model.Id })';
+
+        function pollStatus() {
+            fetch(statusUrl)
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (data) {
+                    if (!data) return;
+                    if (data.isTerminal || data.status !== lastStatus) {
+                        // Status changed — reload once to get the full updated view
+                        location.reload();
+                        return;
+                    }
+                    // Update the "Updated" timestamp without reloading
+                    var updatedEl = document.getElementById('swap-updated-at');
+                    if (updatedEl && data.updatedAt) updatedEl.textContent = data.updatedAt;
+                    // Schedule next poll
+                    setTimeout(pollStatus, pollInterval);
+                })
+                .catch(function () {
+                    // On error, back off and retry
+                    setTimeout(pollStatus, pollInterval * 2);
+                });
+        }
+        setTimeout(pollStatus, pollInterval);
+        </text>
+    }
 })();
 </script>

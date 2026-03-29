@@ -34,11 +34,12 @@ public class LendaSwapPlugin : BaseBTCPayServerPlugin
 
         services.AddHttpClient<LendaSwapApiClient>((provider, client) =>
         {
-            client.BaseAddress = new Uri("http://localhost:3333/");
+            var apiUrl = Environment.GetEnvironmentVariable("LENDASWAP_API_URL");
+            client.BaseAddress = new Uri(string.IsNullOrEmpty(apiUrl) ? "http://localhost:3333/" : apiUrl);
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
-        services.AddScheduledTask<SwapStatusMonitor>(TimeSpan.FromSeconds(5));
+        services.AddScheduledTask<SwapStatusMonitor>(TimeSpan.FromSeconds(2));
 
         base.Execute(services);
     }

@@ -25,6 +25,11 @@ public class SwapStatusMonitor(
         SwapStatus.Completed, SwapStatus.Failed, SwapStatus.Expired
     ];
 
+    /// <summary>
+    /// Auto-expire swaps stuck in non-terminal status for longer than this.
+    /// </summary>
+    private static readonly TimeSpan SwapStaleTimeout = TimeSpan.FromHours(24);
+
     public async Task Do(CancellationToken cancellationToken)
     {
         try
@@ -38,6 +43,19 @@ public class SwapStatusMonitor(
             {
                 try
                 {
+                    // Auto-expire stale swaps that have been stuck too long
+                    if (DateTimeOffset.UtcNow - swap.CreatedAt > SwapStaleTimeout
+                        && swap.Status is SwapStatus.Created or SwapStatus.PendingPayment)
+                    {
+                        swap.Status = SwapStatus.Expired;
+                        swap.ErrorMessage = "Swap expired — no activity within 24 hours.";
+                        swap.UpdatedAt = DateTimeOffset.UtcNow;
+                        await db.SaveChangesAsync(cancellationToken);
+                        logger.LogInformation("Auto-expired stale swap {SwapId} (created {CreatedAt})",
+                            swap.Id, swap.CreatedAt);
+                        continue;
+                    }
+
                     await PollAndUpdateSwap(db, swap, cancellationToken);
                 }
                 catch (Exception ex)
@@ -77,7 +95,7 @@ public class SwapStatusMonitor(
                 {
                     SwapType.EvmToLightning or SwapType.EvmToBitcoin => SwapStatus.Processing,
                     // For LN→EVM, clientfunded means our LN payment arrived, server will fund EVM next
-                    SwapType.LightningToEvm or SwapType.LightningToUsdc or SwapType.BitcoinToEvm => SwapStatus.Processing,
+                    SwapType.LightningToEvm or SwapType.BitcoinToEvm => SwapStatus.Processing,
                     _ => SwapStatus.PendingPayment
                 };
                 break;
@@ -93,7 +111,6 @@ public class SwapStatusMonitor(
 
                     case SwapType.EvmToBitcoin:
                         // Server sent BTC to Taproot HTLC → auto-claim!
-                        // FIX: Set Claiming BEFORE attempt to prevent race condition
                         if (swap.Status is not (SwapStatus.Claiming or SwapStatus.Completed))
                         {
                             swap.Status = SwapStatus.Claiming;
@@ -102,9 +119,8 @@ public class SwapStatusMonitor(
                         }
                         break;
 
-                    case SwapType.LightningToEvm or SwapType.LightningToUsdc or SwapType.BitcoinToEvm:
+                    case SwapType.LightningToEvm or SwapType.BitcoinToEvm:
                         // Server funded EVM HTLC → auto-claim gaslessly!
-                        // FIX: Set Claiming BEFORE attempt to prevent race condition
                         if (swap.Status is not (SwapStatus.Claiming or SwapStatus.Completed))
                         {
                             swap.Status = SwapStatus.Claiming;
@@ -125,7 +141,6 @@ public class SwapStatusMonitor(
                 break;
 
             case "clientredeemed":
-                // FIX: Handle EvmToLightning and EvmToBitcoin separately
                 if (swap.SwapType == SwapType.EvmToBitcoin)
                 {
                     // User claimed BTC HTLC → server still needs to claim EVM HTLC
@@ -133,14 +148,12 @@ public class SwapStatusMonitor(
                 }
                 else
                 {
-                    // All other flows: clientredeemed = done (or nearly done)
                     swap.Status = SwapStatus.Completed;
                     swap.CompletedAt = now;
                 }
                 break;
 
             case "serverredeemed":
-                // Terminal for all flows: server claimed their side
                 swap.Status = SwapStatus.Completed;
                 swap.CompletedAt = now;
                 break;
@@ -162,6 +175,10 @@ public class SwapStatusMonitor(
             case "clientfundedtoolate":
                 swap.Status = SwapStatus.Failed;
                 swap.ErrorMessage = $"Swap ended with status: {remoteStatus}";
+                break;
+
+            default:
+                logger.LogWarning("Unknown remote status '{RemoteStatus}' for swap {SwapId}", remoteStatus, swap.Id);
                 break;
         }
 

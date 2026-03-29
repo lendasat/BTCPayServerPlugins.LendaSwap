@@ -101,6 +101,18 @@ public class SwapService(
         if (isEphemeral)
             return (null, "A Bitcoin wallet must be configured for this store to create swaps. Configure an onchain hot wallet in your store settings.");
 
+        // Validate destination address format
+        if (string.IsNullOrWhiteSpace(model.ClaimDestination))
+            return (null, "Destination address is required.");
+
+        if (IsEvmChain(model.TargetChain) || IsEvmChain(model.SourceChain))
+        {
+            // Basic EVM address validation: 0x + 40 hex chars
+            var addr = model.ClaimDestination.Trim();
+            if (!addr.StartsWith("0x", StringComparison.OrdinalIgnoreCase) || addr.Length != 42)
+                return (null, "Invalid EVM address format. Expected 0x followed by 40 hex characters.");
+        }
+
         var preimage = cryptoHelper.GeneratePreimage();
         var preimageHex = Convert.ToHexString(preimage).ToLowerInvariant();
 
@@ -126,169 +138,26 @@ public class SwapService(
 
         try
         {
-            if (swapType == SwapType.LightningToEvm)
+            switch (swapType.Value)
             {
-                var paymentHash = cryptoHelper.ComputePaymentHash(preimage);
-                swap.PaymentHash = paymentHash;
-
-                // Derive a plugin-internal EVM key for signing the gasless claim.
-                // claiming_address = plugin-derived (signs the HTLC claim)
-                // target_address = user's actual EVM address (receives the tokens)
-                var claimingAddress = await evmClaimService.GetClaimingAddress(store, ct);
-                if (string.IsNullOrEmpty(claimingAddress))
-                    throw new InvalidOperationException("Could not derive EVM claiming key from store wallet.");
-
-                var result = await apiClient.CreateLightningToEvmSwap(new LightningToEvmSwapRequest
-                {
-                    HashLock = "0x" + paymentHash,
-                    AmountIn = model.AmountSats,
-                    ClaimingAddress = claimingAddress,
-                    TargetAddress = model.ClaimDestination, // user's EVM receive address
-                    TokenAddress = model.TargetToken,
-                    EvmChainId = ParseEvmChainId(model.TargetChain),
-                    Gasless = true,
-                    UserId = pubKeyHex,
-                    RefundPk = pubKeyHex
-                }, ct);
-
-                swap.LendaSwapId = result.Id;
-                swap.PaymentAddress = result.Bolt11Invoice;
-                swap.TargetHtlcAddress = result.EvmHtlcAddress;
-                swap.HtlcExpiryBlock = result.EvmRefundLocktime;
-                swap.AmountSats = long.TryParse(result.SourceAmount, out var srcAmt) ? srcAmt : model.AmountSats;
-                swap.Status = SwapStatus.PendingPayment;
-            }
-            else if (swapType == SwapType.BitcoinToEvm)
-            {
-                var paymentHash = cryptoHelper.ComputePaymentHash(preimage);
-                swap.PaymentHash = paymentHash;
-
-                // Derive claiming address for gasless EVM claim
-                var claimingAddress = await evmClaimService.GetClaimingAddress(store, ct);
-                if (string.IsNullOrEmpty(claimingAddress))
-                    throw new InvalidOperationException("Could not derive EVM claiming key from store wallet.");
-
-                var result = await apiClient.CreateBitcoinToEvmSwap(new LightningToEvmSwapRequest
-                {
-                    HashLock = "0x" + paymentHash,
-                    AmountIn = model.AmountSats,
-                    ClaimingAddress = claimingAddress,
-                    TargetAddress = model.ClaimDestination,
-                    TokenAddress = model.TargetToken,
-                    EvmChainId = ParseEvmChainId(model.TargetChain),
-                    Gasless = true,
-                    UserId = pubKeyHex,
-                    RefundPk = pubKeyHex
-                }, ct);
-
-                swap.LendaSwapId = result.Id;
-                swap.PaymentAddress = result.BtcHtlcAddress; // BTC onchain HTLC address to fund
-                swap.TargetHtlcAddress = result.EvmHtlcAddress;
-                swap.HtlcExpiryBlock = result.BtcRefundLocktime;
-                swap.AmountSats = long.TryParse(result.SourceAmount, out var srcAmt) ? srcAmt : model.AmountSats;
-                swap.Status = SwapStatus.PendingPayment;
-            }
-            else if (swapType == SwapType.BitcoinToArkade)
-            {
-                var hash160 = cryptoHelper.ComputeHash160(preimage);
-                swap.PaymentHash = hash160;
-
-                var result = await apiClient.CreateBitcoinToArkadeSwap(new BitcoinToArkadeSwapRequest
-                {
-                    HashLock = hash160,
-                    SatsReceive = model.AmountSats,
-                    TargetArkadeAddress = model.ClaimDestination,
-                    UserId = pubKeyHex,
-                    ClaimPk = pubKeyHex,
-                    RefundPk = pubKeyHex
-                }, ct);
-
-                swap.LendaSwapId = result.Id;
-                swap.PaymentAddress = result.BtcHtlcAddress;
-                swap.TargetHtlcAddress = result.ArkadeVhtlcAddress;
-                swap.HtlcExpiryBlock = result.BtcRefundLocktime;
-                swap.AmountSats = long.TryParse(result.SourceAmount, out var srcAmt) ? srcAmt : model.AmountSats;
-                swap.Status = SwapStatus.PendingPayment;
-            }
-            else if (swapType == SwapType.LightningToArkade)
-            {
-                var paymentHash = cryptoHelper.ComputePaymentHash(preimage);
-                swap.PaymentHash = paymentHash;
-
-                var result = await apiClient.CreateLightningToArkadeSwap(new LightningToArkadeSwapRequest
-                {
-                    HashLock = "0x" + paymentHash,
-                    SatsReceive = model.AmountSats,
-                    TargetArkadeAddress = model.ClaimDestination,
-                    ClaimPk = pubKeyHex,
-                    UserId = pubKeyHex
-                }, ct);
-
-                swap.LendaSwapId = result.Id;
-                swap.PaymentAddress = result.Bolt11Invoice;
-                swap.TargetHtlcAddress = result.ArkadeVhtlcAddress;
-                swap.HtlcExpiryBlock = result.VhtlcRefundLocktime;
-                swap.AmountSats = long.TryParse(result.SourceAmount, out var srcAmt) ? srcAmt : model.AmountSats;
-                swap.Status = SwapStatus.PendingPayment;
-            }
-            else if (swapType == SwapType.EvmToLightning)
-            {
-                // EVM → Lightning: Plugin generates an LN invoice, server pays it after user funds EVM HTLC.
-                // The server derives hash_lock from the invoice's payment_hash. No preimage management needed.
-                var invoice = await CreateLightningInvoice(store, model.AmountSats, "LendaSwap: receive BTC", ct);
-                if (invoice.bolt11 == null)
-                {
-                    swap.Status = SwapStatus.Failed;
-                    swap.ErrorMessage = invoice.error;
-                }
-                else
-                {
-                    var result = await apiClient.CreateEvmToLightningSwap(new EvmToLightningSwapRequest
-                    {
-                        LightningInvoice = invoice.bolt11,
-                        EvmChainId = ParseEvmChainId(model.SourceChain),
-                        TokenAddress = model.SourceToken,
-                        UserAddress = model.ClaimDestination, // user's EVM address (sender)
-                        UserId = pubKeyHex,
-                        Gasless = false
-                    }, ct);
-
-                    swap.LendaSwapId = result.Id;
-                    swap.PaymentHash = result.HashLock;
-                    swap.EvmHtlcAddress = result.EvmHtlcAddress;
-                    swap.SourceAmountRaw = result.SourceAmount;
-                    swap.TargetHtlcAddress = result.ClientLightningInvoice;
-                    swap.HtlcExpiryBlock = result.EvmRefundLocktime;
-                    swap.AmountSats = long.TryParse(result.TargetAmount, out var tgtAmt) ? tgtAmt : model.AmountSats;
-                    swap.Status = SwapStatus.PendingPayment; // waiting for user to fund EVM HTLC
-                }
-            }
-            else if (swapType == SwapType.EvmToBitcoin)
-            {
-                // EVM → Bitcoin: Plugin generates preimage + hash_lock, provides claim_pk.
-                // After user funds EVM HTLC, server sends BTC to a Taproot HTLC that the plugin can claim.
-                var paymentHash = cryptoHelper.ComputePaymentHash(preimage);
-                swap.PaymentHash = paymentHash;
-
-                var result = await apiClient.CreateEvmToBitcoinSwap(new EvmToBitcoinSwapRequest
-                {
-                    HashLock = "0x" + paymentHash,
-                    AmountOut = model.AmountSats,
-                    EvmChainId = ParseEvmChainId(model.SourceChain),
-                    TokenAddress = model.SourceToken,
-                    UserAddress = model.ClaimDestination, // user's EVM address (sender)
-                    ClaimPk = pubKeyHex,
-                    UserId = pubKeyHex,
-                    Gasless = false
-                }, ct);
-
-                swap.LendaSwapId = result.Id;
-                swap.EvmHtlcAddress = result.EvmHtlcAddress;
-                swap.SourceAmountRaw = result.SourceAmount;
-                swap.TargetHtlcAddress = result.BtcHtlcAddress;
-                swap.HtlcExpiryBlock = result.BtcRefundLocktime;
-                swap.AmountSats = long.TryParse(result.TargetAmount, out var tgtAmt) ? tgtAmt : model.AmountSats;
-                swap.Status = SwapStatus.PendingPayment; // waiting for user to fund EVM HTLC
+                case SwapType.LightningToEvm:
+                    await CreateBtcToEvmSwap(swap, model, store, pubKeyHex, preimage, isLightning: true, ct);
+                    break;
+                case SwapType.BitcoinToEvm:
+                    await CreateBtcToEvmSwap(swap, model, store, pubKeyHex, preimage, isLightning: false, ct);
+                    break;
+                case SwapType.BitcoinToArkade:
+                    await CreateBtcToArkadeSwap(swap, model, pubKeyHex, preimage, isLightning: false, ct);
+                    break;
+                case SwapType.LightningToArkade:
+                    await CreateBtcToArkadeSwap(swap, model, pubKeyHex, preimage, isLightning: true, ct);
+                    break;
+                case SwapType.EvmToLightning:
+                    await CreateEvmToLightningSwap(swap, model, store, pubKeyHex, ct);
+                    break;
+                case SwapType.EvmToBitcoin:
+                    await CreateEvmToBitcoinSwap(swap, model, pubKeyHex, preimage, ct);
+                    break;
             }
         }
         catch (Exception ex)
@@ -311,6 +180,174 @@ public class SwapService(
     }
 
     /// <summary>
+    /// BTC (Lightning or onchain) → EVM swap: compute SHA256 hash, derive EVM claiming key, call API.
+    /// </summary>
+    private async Task CreateBtcToEvmSwap(
+        SwapRecord swap, CreateSwapViewModel model, StoreData store, string pubKeyHex,
+        byte[] preimage, bool isLightning, CancellationToken ct)
+    {
+        var paymentHash = cryptoHelper.ComputePaymentHash(preimage);
+        swap.PaymentHash = paymentHash;
+
+        var claimingAddress = await evmClaimService.GetClaimingAddress(store, ct);
+        if (string.IsNullOrEmpty(claimingAddress))
+            throw new InvalidOperationException("Could not derive EVM claiming key from store wallet.");
+
+        var request = new LightningToEvmSwapRequest
+        {
+            HashLock = "0x" + paymentHash,
+            AmountIn = model.AmountSats,
+            ClaimingAddress = claimingAddress,
+            TargetAddress = model.ClaimDestination,
+            TokenAddress = model.TargetToken,
+            EvmChainId = ParseEvmChainId(model.TargetChain),
+            Gasless = true,
+            UserId = pubKeyHex,
+            RefundPk = pubKeyHex
+        };
+
+        if (isLightning)
+        {
+            var result = await apiClient.CreateLightningToEvmSwap(request, ct);
+            swap.LendaSwapId = result.Id;
+            swap.PaymentAddress = result.Bolt11Invoice;
+            swap.TargetHtlcAddress = result.EvmHtlcAddress;
+            swap.HtlcExpiryBlock = result.EvmRefundLocktime;
+            swap.AmountSats = long.TryParse(result.SourceAmount, out var srcAmt) ? srcAmt : model.AmountSats;
+        }
+        else
+        {
+            var result = await apiClient.CreateBitcoinToEvmSwap(request, ct);
+            swap.LendaSwapId = result.Id;
+            swap.PaymentAddress = result.BtcHtlcAddress;
+            swap.TargetHtlcAddress = result.EvmHtlcAddress;
+            swap.HtlcExpiryBlock = result.BtcRefundLocktime;
+            swap.AmountSats = long.TryParse(result.SourceAmount, out var srcAmt) ? srcAmt : model.AmountSats;
+        }
+
+        swap.Status = SwapStatus.PendingPayment;
+    }
+
+    /// <summary>
+    /// BTC (Lightning or onchain) → Arkade swap.
+    /// </summary>
+    private async Task CreateBtcToArkadeSwap(
+        SwapRecord swap, CreateSwapViewModel model, string pubKeyHex,
+        byte[] preimage, bool isLightning, CancellationToken ct)
+    {
+        if (isLightning)
+        {
+            var paymentHash = cryptoHelper.ComputePaymentHash(preimage);
+            swap.PaymentHash = paymentHash;
+
+            var result = await apiClient.CreateLightningToArkadeSwap(new LightningToArkadeSwapRequest
+            {
+                HashLock = "0x" + paymentHash,
+                SatsReceive = model.AmountSats,
+                TargetArkadeAddress = model.ClaimDestination,
+                ClaimPk = pubKeyHex,
+                UserId = pubKeyHex
+            }, ct);
+
+            swap.LendaSwapId = result.Id;
+            swap.PaymentAddress = result.Bolt11Invoice;
+            swap.TargetHtlcAddress = result.ArkadeVhtlcAddress;
+            swap.HtlcExpiryBlock = result.VhtlcRefundLocktime;
+            swap.AmountSats = long.TryParse(result.SourceAmount, out var srcAmt) ? srcAmt : model.AmountSats;
+        }
+        else
+        {
+            var hash160 = cryptoHelper.ComputeHash160(preimage);
+            swap.PaymentHash = hash160;
+
+            var result = await apiClient.CreateBitcoinToArkadeSwap(new BitcoinToArkadeSwapRequest
+            {
+                HashLock = hash160,
+                SatsReceive = model.AmountSats,
+                TargetArkadeAddress = model.ClaimDestination,
+                UserId = pubKeyHex,
+                ClaimPk = pubKeyHex,
+                RefundPk = pubKeyHex
+            }, ct);
+
+            swap.LendaSwapId = result.Id;
+            swap.PaymentAddress = result.BtcHtlcAddress;
+            swap.TargetHtlcAddress = result.ArkadeVhtlcAddress;
+            swap.HtlcExpiryBlock = result.BtcRefundLocktime;
+            swap.AmountSats = long.TryParse(result.SourceAmount, out var srcAmt) ? srcAmt : model.AmountSats;
+        }
+
+        swap.Status = SwapStatus.PendingPayment;
+    }
+
+    /// <summary>
+    /// EVM → Lightning swap: generate LN invoice, server pays it after user funds EVM HTLC.
+    /// </summary>
+    private async Task CreateEvmToLightningSwap(
+        SwapRecord swap, CreateSwapViewModel model, StoreData store, string pubKeyHex,
+        CancellationToken ct)
+    {
+        var invoice = await CreateLightningInvoice(store, model.AmountSats, "LendaSwap: receive BTC", ct);
+        if (invoice.bolt11 == null)
+        {
+            swap.Status = SwapStatus.Failed;
+            swap.ErrorMessage = invoice.error;
+            return;
+        }
+
+        var result = await apiClient.CreateEvmToLightningSwap(new EvmToLightningSwapRequest
+        {
+            LightningInvoice = invoice.bolt11,
+            EvmChainId = ParseEvmChainId(model.SourceChain),
+            TokenAddress = model.SourceToken,
+            UserAddress = model.ClaimDestination,
+            UserId = pubKeyHex,
+            Gasless = false
+        }, ct);
+
+        swap.LendaSwapId = result.Id;
+        swap.PaymentHash = result.HashLock;
+        swap.EvmHtlcAddress = result.EvmHtlcAddress;
+        swap.SourceAmountRaw = result.SourceAmount;
+        swap.TargetHtlcAddress = result.ClientLightningInvoice;
+        swap.HtlcExpiryBlock = result.EvmRefundLocktime;
+        swap.AmountSats = long.TryParse(result.TargetAmount, out var tgtAmt) ? tgtAmt : model.AmountSats;
+        swap.Status = SwapStatus.PendingPayment;
+    }
+
+    /// <summary>
+    /// EVM → Bitcoin swap: plugin generates preimage + hash_lock, provides claim_pk.
+    /// After user funds EVM HTLC, server sends BTC to a Taproot HTLC that the plugin can claim.
+    /// </summary>
+    private async Task CreateEvmToBitcoinSwap(
+        SwapRecord swap, CreateSwapViewModel model, string pubKeyHex,
+        byte[] preimage, CancellationToken ct)
+    {
+        var paymentHash = cryptoHelper.ComputePaymentHash(preimage);
+        swap.PaymentHash = paymentHash;
+
+        var result = await apiClient.CreateEvmToBitcoinSwap(new EvmToBitcoinSwapRequest
+        {
+            HashLock = "0x" + paymentHash,
+            AmountOut = model.AmountSats,
+            EvmChainId = ParseEvmChainId(model.SourceChain),
+            TokenAddress = model.SourceToken,
+            UserAddress = model.ClaimDestination,
+            ClaimPk = pubKeyHex,
+            UserId = pubKeyHex,
+            Gasless = false
+        }, ct);
+
+        swap.LendaSwapId = result.Id;
+        swap.EvmHtlcAddress = result.EvmHtlcAddress;
+        swap.SourceAmountRaw = result.SourceAmount;
+        swap.TargetHtlcAddress = result.BtcHtlcAddress;
+        swap.HtlcExpiryBlock = result.BtcRefundLocktime;
+        swap.AmountSats = long.TryParse(result.TargetAmount, out var tgtAmt) ? tgtAmt : model.AmountSats;
+        swap.Status = SwapStatus.PendingPayment;
+    }
+
+    /// <summary>
     /// Attempts to auto-pay a swap from the store's wallet (Lightning or onchain).
     /// Updates the swap record in DB.
     /// </summary>
@@ -325,7 +362,7 @@ public class SwapService(
 
         try
         {
-            if (swap.SwapType is SwapType.LightningToEvm or SwapType.LightningToUsdc or SwapType.LightningToArkade)
+            if (swap.SwapType is SwapType.LightningToEvm or SwapType.LightningToArkade)
             {
                 var (success, error) = await PayLightningInvoice(store, swap.PaymentAddress, ct);
                 if (success)
@@ -413,13 +450,7 @@ public class SwapService(
             case PayResult.CouldNotFindRoute:
                 return (false, "Could not find route to pay invoice.");
             case PayResult.Unknown:
-                if (lnConfig.GetExternalLightningUrl() is { } connStr2)
-                    client = lightningClientFactory.Create(connStr2, network);
-                else if (lnConfig.IsInternalNode &&
-                         lightningNetworkOptions.Value.InternalLightningByCryptoCode
-                             .TryGetValue("BTC", out var internalNode2))
-                    client = internalNode2;
-
+                // Payment was submitted but result is ambiguous — check status
                 try
                 {
                     var payment = await client.GetPayment(
@@ -475,7 +506,6 @@ public class SwapService(
         var recCoins = (await wallet.GetUnspentCoins(derivationSettings.AccountDerivation,
             cancellation: ct)).ToArray();
         var coins = recCoins.Select(c => c.Coin).ToArray();
-        var keys = recCoins.Select(c => accountKey.Derive(c.KeyPath).PrivateKey).ToArray();
 
         var feeRate = await feeProviderFactory.CreateFeeProvider(network).GetFeeRateAsync(1);
 
@@ -485,13 +515,24 @@ public class SwapService(
         Transaction tx;
         try
         {
+            // Build unsigned first for coin selection, then derive only the needed keys
             var txBuilder = network.NBitcoinNetwork.CreateTransactionBuilder()
                 .AddCoins(coins)
-                .AddKeys(keys)
                 .Send(dest, Money.Satoshis(amountSats))
                 .SetChange(changeAddress.Address)
                 .SendEstimatedFees(feeRate);
 
+            // BuildTransaction(sign: false) performs coin selection without needing keys
+            var unsignedTx = txBuilder.BuildTransaction(false);
+
+            // Derive keys only for the selected inputs
+            var selectedOutpoints = unsignedTx.Inputs.Select(i => i.PrevOut).ToHashSet();
+            var selectedKeys = recCoins
+                .Where(c => selectedOutpoints.Contains(c.Coin.Outpoint))
+                .Select(c => accountKey.Derive(c.KeyPath).PrivateKey)
+                .ToArray();
+
+            txBuilder.AddKeys(selectedKeys);
             tx = txBuilder.BuildTransaction(true);
         }
         catch (NotEnoughFundsException)

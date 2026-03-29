@@ -12,4 +12,7 @@ public class LendaSwapSettingsViewModel
 
     [Display(Name = "Default EVM Address")]
     public string DefaultEvmAddress { get; set; }
+
+    [Display(Name = "API Base URL")]
+    public string ApiBaseUrl { get; set; }
 }

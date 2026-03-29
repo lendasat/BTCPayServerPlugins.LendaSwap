@@ -91,8 +91,9 @@ public class SwapRecord
 
     internal static void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // Composite index for the swap list query (filter by store, order by date)
         modelBuilder.Entity<SwapRecord>()
-            .HasIndex(s => s.StoreId);
+            .HasIndex(s => new { s.StoreId, s.CreatedAt });
 
         modelBuilder.Entity<SwapRecord>()
             .HasIndex(s => s.LendaSwapId);
@@ -104,13 +105,14 @@ public class SwapRecord
 
 public enum SwapType
 {
-    LightningToUsdc,
-    BitcoinToArkade,
-    LightningToEvm,
-    LightningToArkade,
-    BitcoinToEvm,
-    EvmToLightning,
-    EvmToBitcoin
+    [System.Obsolete("Use LightningToEvm instead. Kept for backward compatibility with existing DB records.")]
+    LightningToUsdc = 0,
+    BitcoinToArkade = 1,
+    LightningToEvm = 2,
+    LightningToArkade = 3,
+    BitcoinToEvm = 4,
+    EvmToLightning = 5,
+    EvmToBitcoin = 6
 }
 
 public enum SwapStatus

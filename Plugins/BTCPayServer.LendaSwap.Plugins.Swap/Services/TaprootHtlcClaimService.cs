@@ -71,9 +71,10 @@ public class TaprootHtlcClaimService(
         {
             preimageHex = Protector.Unprotect(swap.PreimageEncrypted);
         }
-        catch
+        catch (Exception ex)
         {
-            return (false, null, "Failed to decrypt preimage.");
+            logger.LogError(ex, "Failed to decrypt preimage for swap {SwapId}", swap.Id);
+            return (false, null, "Failed to decrypt preimage. DataProtection keys may have changed.");
         }
         var preimageBytes = Convert.FromHexString(preimageHex);
 
@@ -161,12 +162,15 @@ public class TaprootHtlcClaimService(
         FeeRate feeRate;
         try
         {
-            var feeRateResult = await explorerClient.GetFeeRateAsync(6, ct);
+            // Use a 2-block target for HTLC claims — time-sensitive due to locktime
+            var feeRateResult = await explorerClient.GetFeeRateAsync(2, ct);
             feeRate = feeRateResult.FeeRate;
         }
-        catch
+        catch (Exception ex)
         {
-            feeRate = new FeeRate(Money.Satoshis(2), 1); // fallback 2 sat/vb
+            // Fallback 10 sat/vB — conservative enough for HTLC claims where timing matters
+            logger.LogWarning(ex, "Failed to fetch fee rate, using fallback 10 sat/vB for HTLC claim");
+            feeRate = new FeeRate(Money.Satoshis(10), 1);
         }
         var estimatedFee = feeRate.GetFee(150);
         var outputAmount = Money.Satoshis(targetAmountSats) - estimatedFee;

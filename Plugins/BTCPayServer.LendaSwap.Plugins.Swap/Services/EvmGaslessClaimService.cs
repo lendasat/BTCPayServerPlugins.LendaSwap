@@ -80,7 +80,7 @@ public class EvmGaslessClaimService(
     public async Task<(bool success, string txHash, string error)> TryGaslessClaim(
         StoreData store, SwapRecord swap, GetSwapResponse remote, CancellationToken ct)
     {
-        if (swap.SwapType is not (SwapType.LightningToEvm or SwapType.LightningToUsdc or SwapType.BitcoinToEvm))
+        if (swap.SwapType is not (SwapType.LightningToEvm or SwapType.BitcoinToEvm))
             return (false, null, "Not a BTC→EVM swap.");
 
         if (string.IsNullOrEmpty(remote.EvmHtlcAddress) ||
@@ -99,9 +99,10 @@ public class EvmGaslessClaimService(
         {
             preimageHex = Protector.Unprotect(swap.PreimageEncrypted);
         }
-        catch
+        catch (Exception ex)
         {
-            return (false, null, "Failed to decrypt preimage.");
+            logger.LogError(ex, "Failed to decrypt preimage for swap {SwapId}", swap.Id);
+            return (false, null, "Failed to decrypt preimage. DataProtection keys may have changed.");
         }
 
         var keyResult = await DeriveEvmKey(store, ct);
