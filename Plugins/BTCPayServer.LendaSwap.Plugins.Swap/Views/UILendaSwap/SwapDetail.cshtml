@@ -52,9 +52,13 @@
             return $"{rawAmount} {symbol ?? "tokens"}";
         if (decimals is null or 0)
             return $"{raw:N0} {symbol ?? "tokens"}";
-        var value = raw / (decimal)Math.Pow(10, decimals.Value);
-        var formatted = value.ToString($"N{Math.Min(decimals.Value, 8)}",
-            System.Globalization.CultureInfo.InvariantCulture);
+        var divisor = 1m;
+        for (var i = 0; i < decimals.Value; i++) divisor *= 10m;
+        var value = raw / divisor;
+        // Show up to 8 fractional digits, strip trailing zeros
+        var maxFrac = Math.Min(decimals.Value, 8);
+        var formatted = value.ToString($"F{maxFrac}", System.Globalization.CultureInfo.InvariantCulture)
+            .TrimEnd('0').TrimEnd('.');
         return $"{formatted} {symbol ?? "tokens"}";
     }
 

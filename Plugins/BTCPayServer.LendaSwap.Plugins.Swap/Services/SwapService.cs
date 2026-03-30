@@ -142,13 +142,6 @@ public class SwapService(
             UpdatedAt = DateTimeOffset.UtcNow
         };
 
-        // Resolve token metadata (symbol + decimals) for human-readable display
-        var tokens = await ResolveTokenMetadata(model, ct);
-        swap.SourceTokenSymbol = tokens.srcSymbol;
-        swap.SourceTokenDecimals = tokens.srcDecimals;
-        swap.TargetTokenSymbol = tokens.tgtSymbol;
-        swap.TargetTokenDecimals = tokens.tgtDecimals;
-
         try
         {
             switch (swapType.Value)
@@ -178,6 +171,12 @@ public class SwapService(
             swap.Status = SwapStatus.Failed;
             swap.ErrorMessage = ex.Message;
         }
+
+        // BTC fallback: if API response didn't provide token metadata, fill in BTC defaults
+        swap.SourceTokenSymbol ??= IsBtcChain(model.SourceChain) ? "BTC" : null;
+        swap.TargetTokenSymbol ??= IsBtcChain(model.TargetChain) ? "BTC" : null;
+        swap.SourceTokenDecimals ??= IsBtcChain(model.SourceChain) ? 8 : null;
+        swap.TargetTokenDecimals ??= IsBtcChain(model.TargetChain) ? 8 : null;
 
         await using var db = dbContextFactory.CreateContext();
         db.SwapRecords.Add(swap);
@@ -271,6 +270,8 @@ public class SwapService(
             swap.TargetHtlcAddress = result.ArkadeVhtlcAddress;
             swap.HtlcExpiryBlock = result.VhtlcRefundLocktime;
             swap.AmountSats = long.TryParse(result.SourceAmount, out var srcAmt) ? srcAmt : model.AmountSats;
+            swap.TargetAmountRaw = result.TargetAmount;
+            PopulateTokenMetadataFromResponse(swap, result);
         }
         else
         {
@@ -292,6 +293,8 @@ public class SwapService(
             swap.TargetHtlcAddress = result.ArkadeVhtlcAddress;
             swap.HtlcExpiryBlock = result.BtcRefundLocktime;
             swap.AmountSats = long.TryParse(result.SourceAmount, out var srcAmt) ? srcAmt : model.AmountSats;
+            swap.TargetAmountRaw = result.TargetAmount;
+            PopulateTokenMetadataFromResponse(swap, result);
         }
 
         swap.Status = SwapStatus.PendingPayment;
@@ -662,44 +665,6 @@ public class SwapService(
         string.Equals(chain, "polygon", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(chain, "ethereum", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(chain, "arbitrum", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Resolves token symbol + decimals from the /tokens API for both sides of the swap.
-    /// Falls back to sensible defaults if the API call fails.
-    /// </summary>
-    private async Task<(string srcSymbol, int? srcDecimals, string tgtSymbol, int? tgtDecimals)>
-        ResolveTokenMetadata(CreateSwapViewModel model, CancellationToken ct)
-    {
-        string srcSymbol = null, tgtSymbol = null;
-        int? srcDecimals = null, tgtDecimals = null;
-
-        try
-        {
-            var tokens = await apiClient.GetTokens(ct);
-            var all = new List<TokenInfo>(tokens.BtcTokens);
-            all.AddRange(tokens.EvmTokens);
-
-            var src = all.FirstOrDefault(t =>
-                string.Equals(t.TokenId, model.SourceToken, StringComparison.OrdinalIgnoreCase));
-            var tgt = all.FirstOrDefault(t =>
-                string.Equals(t.TokenId, model.TargetToken, StringComparison.OrdinalIgnoreCase));
-
-            if (src != null) { srcSymbol = src.Symbol; srcDecimals = src.Decimals; }
-            if (tgt != null) { tgtSymbol = tgt.Symbol; tgtDecimals = tgt.Decimals; }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to resolve token metadata for display");
-        }
-
-        // Fallback for BTC tokens
-        srcSymbol ??= IsBtcChain(model.SourceChain) ? "BTC" : null;
-        tgtSymbol ??= IsBtcChain(model.TargetChain) ? "BTC" : null;
-        srcDecimals ??= IsBtcChain(model.SourceChain) ? 8 : null;
-        tgtDecimals ??= IsBtcChain(model.TargetChain) ? 8 : null;
-
-        return (srcSymbol, srcDecimals, tgtSymbol, tgtDecimals);
-    }
 
     /// <summary>
     /// Overwrites token metadata from the API response if available (more authoritative than /tokens lookup).
