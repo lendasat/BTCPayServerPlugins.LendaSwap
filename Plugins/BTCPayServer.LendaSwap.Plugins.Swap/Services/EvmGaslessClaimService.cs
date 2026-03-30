@@ -1,5 +1,8 @@
 using System;
+using System.Globalization;
+using System.Net.Http;
 using System.Numerics;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Data;
@@ -12,6 +15,7 @@ using NBitcoin;
 using NBitcoin.Secp256k1;
 using NBXplorer;
 using Nethereum.Util;
+using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.LendaSwap.Plugins.Swap.Services;
 
@@ -210,6 +214,13 @@ public class EvmGaslessClaimService(
         {
             // 1. Get Permit2 funding calldata from LendaSwap API
             var calldata = await apiClient.GetPermit2FundingCalldata(swap.LendaSwapId, ct);
+
+            // 1b. Check on-chain token balance before attempting Permit2
+            var balanceCheck = await CheckTokenBalance(
+                swap.SourceChain, calldata.SourceTokenAddress,
+                swap.EvmDepositAddress, calldata.SourceAmount, swap.SourceTokenDecimals, swap.SourceTokenSymbol);
+            if (balanceCheck != null)
+                return (false, null, balanceCheck);
 
             // 2. Generate nonce and deadline
             var nonceBytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
@@ -512,6 +523,74 @@ public class EvmGaslessClaimService(
         var padded = new byte[32];
         Array.Copy(addressBytes, 0, padded, 12, 20);
         return padded;
+    }
+
+    /// <summary>
+    /// Checks on-chain ERC-20 balance at the deposit address before attempting Permit2.
+    /// Returns an error message if underfunded, null if balance is sufficient.
+    /// </summary>
+    private async Task<string> CheckTokenBalance(
+        string chainId, string tokenAddress, string depositAddress,
+        long requiredAmount, int? decimals, string symbol)
+    {
+        try
+        {
+            var rpcUrl = GetEvmRpcUrl(chainId);
+            if (rpcUrl == null) return null; // Can't check, proceed anyway
+
+            // balanceOf(address) = 0x70a08231 + abi-encoded address
+            var addr = depositAddress.StartsWith("0x") ? depositAddress[2..] : depositAddress;
+            var callData = "0x70a08231" + addr.PadLeft(64, '0');
+
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            var payload = $"{{\"jsonrpc\":\"2.0\",\"method\":\"eth_call\",\"params\":[{{\"to\":\"{tokenAddress}\",\"data\":\"{callData}\"}},\"latest\"],\"id\":1}}";
+            var response = await client.PostAsync(rpcUrl,
+                new StringContent(payload, Encoding.UTF8, "application/json"));
+            var json = JObject.Parse(await response.Content.ReadAsStringAsync());
+
+            var resultHex = json["result"]?.ToString();
+            if (string.IsNullOrEmpty(resultHex) || resultHex == "0x")
+                return null; // Can't parse, proceed anyway
+
+            var balance = BigInteger.Parse(resultHex[2..], NumberStyles.HexNumber);
+            var required = new BigInteger(requiredAmount);
+
+            if (balance >= required)
+                return null; // Sufficient
+
+            // Format human-readable amounts
+            var sym = symbol ?? "tokens";
+            var dec = decimals ?? 0;
+            if (dec > 0)
+            {
+                var divisor = BigInteger.Pow(10, dec);
+                var balFmt = ((decimal)balance / (decimal)divisor).ToString($"F{Math.Min(dec, 6)}").TrimEnd('0').TrimEnd('.');
+                var reqFmt = ((decimal)required / (decimal)divisor).ToString($"F{Math.Min(dec, 6)}").TrimEnd('0').TrimEnd('.');
+                return $"Insufficient balance: need {reqFmt} {sym} but deposit address only has {balFmt} {sym}. Please send more {sym} to {depositAddress}";
+            }
+
+            return $"Insufficient balance: need {required} but only have {balance} (smallest unit)";
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Failed to check token balance, proceeding with fund attempt");
+            return null; // Can't check, proceed anyway
+        }
+    }
+
+    private static string GetEvmRpcUrl(string chainId)
+    {
+        // Check for local override first (dev/regtest), then public RPCs
+        var envOverride = Environment.GetEnvironmentVariable("EVM_RPC_URL");
+        if (!string.IsNullOrEmpty(envOverride)) return envOverride;
+
+        return chainId switch
+        {
+            "137" => Environment.GetEnvironmentVariable("POLYGON_RPC") ?? "http://localhost:8545",
+            "1" => Environment.GetEnvironmentVariable("ETHEREUM_RPC") ?? null,
+            "42161" => Environment.GetEnvironmentVariable("ARBITRUM_RPC") ?? null,
+            _ => null
+        };
     }
 
     private static byte[] PadTo32(byte[] data)
