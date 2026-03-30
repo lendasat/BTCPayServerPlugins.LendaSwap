@@ -29,6 +29,13 @@ jobs:
         with:
           dotnet-version: 8.0.414
 
+      - name: Import GPG key
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d | gpg --batch --import
+          echo "GPG key imported"
+          gpg --list-keys --keyid-format long
+
       - name: Build solution (Release)
         run: dotnet build BTCPayServerPlugins.RockstarDev.sln -c Release -maxcpucount:1
 
@@ -39,8 +46,20 @@ jobs:
             BTCPayServer.LendaSwap.Plugins.Swap \
             ./artifacts
 
+      - name: Sign artifacts with GPG
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        run: |
+          cd artifacts
+          BTCPAY_FILE=$(find . -name "*.btcpay" | head -1)
+          if [ -n "$BTCPAY_FILE" ]; then
+            sha256sum "$BTCPAY_FILE" > SHA256SUMS
+            gpg --batch --yes --armor --detach-sign SHA256SUMS
+            echo "Signed SHA256SUMS:"
+            cat SHA256SUMS
+          fi
+
       - name: List artifacts
-        run: find ./artifacts -type f | head -20
+        run: find ./artifacts -type f
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -51,6 +70,8 @@ jobs:
           files: |
             artifacts/**/*.btcpay
             artifacts/**/*.btcpay.json
+            artifacts/**/SHA256SUMS
+            artifacts/**/SHA256SUMS.asc
           body: |
             ## LendaSwap Plugin v${{ steps.version.outputs.version }}
 
@@ -59,8 +80,18 @@ jobs:
             2. Upload the `.btcpay` file from this release
             3. Restart BTCPayServer
 
+            ### Verify Signature
+            ```bash
+            # Import the LendaSwap public key
+            gpg --keyserver keyserver.ubuntu.com --recv-keys DE09AE0D86F564C4
+            # Verify
+            gpg --verify SHA256SUMS.asc SHA256SUMS
+            sha256sum -c SHA256SUMS
+            ```
+
             ### Plugin Builder
-            To install via the marketplace, configure the plugin builder with:
             - **Repository:** `${{ github.server_url }}/${{ github.repository }}`
-            - **Tag:** `v${{ steps.version.outputs.version }}`
+            - **Branch:** `master`
             - **Directory:** `Plugins/BTCPayServer.LendaSwap.Plugins.Swap`
+
+            **GPG Fingerprint:** `B772 B5EF 21EF 0373 6B6F C9CD DE09 AE0D 86F5 64C4`
