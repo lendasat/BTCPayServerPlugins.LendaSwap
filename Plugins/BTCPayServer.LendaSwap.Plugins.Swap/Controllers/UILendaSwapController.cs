@@ -155,8 +155,8 @@ public class UILendaSwapController(
             if (paid)
             {
                 var successMsg = swap.SwapType is SwapType.LightningToEvm or SwapType.LightningToArkade
-                    ? "Swap created and paid via Lightning. Waiting for claim."
-                    : "Swap created and payment broadcast from hot wallet.";
+                    ? "Swap created — BTC sent via Lightning. You'll receive your tokens shortly."
+                    : "Swap created — BTC payment sent. You'll receive your tokens shortly.";
                 TempData.SetStatusMessageModel(new StatusMessageModel
                 {
                     Message = successMsg,
@@ -167,7 +167,7 @@ public class UILendaSwapController(
             {
                 TempData.SetStatusMessageModel(new StatusMessageModel
                 {
-                    Message = "Swap created. Auto-pay was not possible — please pay manually.",
+                    Message = "Swap created — automatic payment was not possible. Please pay manually using the details below.",
                     Severity = StatusMessageModel.StatusSeverity.Warning
                 });
             }

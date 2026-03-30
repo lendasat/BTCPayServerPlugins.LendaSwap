@@ -109,11 +109,11 @@
                         ? "Tokens received. Converting to BTC..."
                         : "Processing swap...",
                 SwapStatus.PendingClaim => isBtcToEvm
-                    ? "Tokens ready. Claiming automatically..."
+                    ? "Almost done — delivering your tokens..."
                     : isEvmToBtc
-                        ? "BTC ready. Claiming automatically..."
-                        : "Waiting for claim...",
-                SwapStatus.Claiming => "Claim submitted. Waiting for confirmation...",
+                        ? "Almost done — delivering your BTC..."
+                        : "Almost done...",
+                SwapStatus.Claiming => "Finalizing — waiting for confirmation...",
                 _ => "Processing..."
             };
             <div class="alert alert-primary d-flex align-items-center gap-3 mb-4">
@@ -244,10 +244,9 @@
         @if (Model.Status == SwapStatus.PayingFromWallet)
         {
             <div class="alert alert-info">
-                <h5 class="alert-heading mb-2">Payment Sent from Wallet</h5>
+                <h5 class="alert-heading mb-2">BTC Payment Sent</h5>
                 <p class="mb-1">
-                    An onchain transaction has been broadcast from your store's hot wallet.
-                    Waiting for confirmations before the swap can proceed.
+                    Your BTC payment has been sent. Waiting for confirmations before the swap can proceed.
                 </p>
                 @if (!string.IsNullOrEmpty(Model.TxId))
                 {
