@@ -94,7 +94,7 @@
                 _ => "Processing..."
             };
             <div class="alert alert-primary d-flex align-items-center gap-3 mb-4">
-                <div class="spinner-border text-primary" role="status" style="width: 2rem; height: 2rem;">
+                <div class="spinner-border" role="status" style="width: 2rem; height: 2rem;">
                     <span class="visually-hidden">Processing...</span>
                 </div>
                 <div>
@@ -638,7 +638,7 @@
             } else if (!data.isTerminal && data.status !== 'PendingPayment') {
                 var msg = stepMessages[data.status] || 'Processing...';
                 alertZone.innerHTML = '<div class="alert alert-primary d-flex align-items-center gap-3 mb-4">' +
-                    '<div class="spinner-border text-primary" role="status" style="width: 2rem; height: 2rem;"><span class="visually-hidden">Processing...</span></div>' +
+                    '<div class="spinner-border" role="status" style="width: 2rem; height: 2rem;"><span class="visually-hidden">Processing...</span></div>' +
                     '<div><h5 class="mb-1">Swap in progress</h5><p class="mb-0">' + escapeHtml(msg) + '</p>' +
                     '<small class="opacity-75">Status updates automatically.</small></div></div>';
             }
