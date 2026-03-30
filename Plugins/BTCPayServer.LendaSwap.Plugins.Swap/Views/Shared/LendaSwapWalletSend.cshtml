@@ -1,0 +1,53 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Models.WalletViewModels
+@model WalletSendModel
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+}
+@if (!string.IsNullOrEmpty(storeId))
+{
+    var swapSendUrl = Url.Action("Send", "UILendaSwap", new { storeId });
+    <div class="mt-4 pt-4 border-top" id="lendaswap-wallet-send">
+        <div class="d-flex align-items-center gap-3 p-3 rounded border">
+            <svg class="text-primary flex-shrink-0" style="width:24px;height:24px;" role="img" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="17 1 21 5 17 9"></polyline>
+                <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
+                <polyline points="7 23 3 19 7 15"></polyline>
+                <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
+            </svg>
+            <div class="flex-grow-1">
+                <span class="fw-semibold">Swap to another chain</span>
+                <span class="text-secondary small d-block">
+                    Send BTC via Lightning or Onchain and receive EVM tokens or Arkade BTC
+                </span>
+            </div>
+            <a id="lendaswap-send-link" href="@swapSendUrl" class="btn btn-outline-primary text-nowrap">
+                LendaSwap
+            </a>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        var link = document.getElementById('lendaswap-send-link');
+        if (!link) return;
+        var baseUrl = link.href;
+        var amountInputs = document.querySelectorAll('.output-amount');
+
+        function updateLink() {
+            var raw = amountInputs.length ? amountInputs[0].value : '';
+            if (raw && parseFloat(raw) > 0) {
+                var sats = Math.round(parseFloat(raw) * 1e8);
+                link.href = baseUrl + (baseUrl.indexOf('?') >= 0 ? '&' : '?') + 'amountSats=' + sats;
+            } else {
+                link.href = baseUrl;
+            }
+        }
+
+        amountInputs.forEach(function (el) { el.addEventListener('input', updateLink); });
+        updateLink();
+    })();
+    </script>
+}

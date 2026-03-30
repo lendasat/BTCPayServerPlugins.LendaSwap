@@ -89,7 +89,7 @@ public class UILendaSwapController(
     }
 
     [HttpGet("send")]
-    public async Task<IActionResult> Send(string storeId)
+    public async Task<IActionResult> Send(string storeId, long? amountSats = null)
     {
         var storeSettings = await dbContextFactory.GetSettingAsync(storeId);
         PopulateWalletStatus();
@@ -103,6 +103,7 @@ public class UILendaSwapController(
             SourceToken = "btc",
             TargetChain = "137",
             TargetToken = "",
+            AmountSats = amountSats ?? 0,
             ClaimDestination = storeSettings.DefaultEvmAddress ?? storeSettings.DefaultPolygonAddress,
             BtcTokens = tokens.BtcTokens,
             EvmTokens = tokens.EvmTokens
