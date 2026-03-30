@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Newtonsoft.Json;
 
 namespace BTCPayServer.LendaSwap.Plugins.Swap.Services;
@@ -147,6 +148,42 @@ public class EvmToBitcoinSwapRequest
 
     [JsonProperty("referral_code")]
     public string ReferralCode { get; set; }
+}
+
+public class FundGaslessRequest
+{
+    [JsonProperty("permit2_nonce")]
+    public string Permit2Nonce { get; set; }
+
+    [JsonProperty("permit2_deadline")]
+    public long Permit2Deadline { get; set; }
+
+    [JsonProperty("permit2_signature")]
+    public string Permit2Signature { get; set; }
+
+    [JsonProperty("calls")]
+    public List<Permit2Call> Calls { get; set; }
+
+    [JsonProperty("eip2612_permit")]
+    public Eip2612Permit Eip2612Permit { get; set; }
+}
+
+public class Eip2612Permit
+{
+    [JsonProperty("v")]
+    public int V { get; set; }
+
+    [JsonProperty("r")]
+    public string R { get; set; }
+
+    [JsonProperty("s")]
+    public string S { get; set; }
+
+    [JsonProperty("value")]
+    public string Value { get; set; }
+
+    [JsonProperty("deadline")]
+    public long Deadline { get; set; }
 }
 
 public class ClaimGaslessRequest

@@ -58,11 +58,28 @@ public class SwapRecord
     public string RefundPubKeyHex { get; set; }
 
     /// <summary>
-    /// For EVM→BTC flows: the EVM HTLC contract address that the user must fund.
-    /// Stores the token amount the user needs to send (in source token smallest units).
+    /// For EVM→BTC flows: the EVM HTLC contract address (metadata, not the funding target).
     /// </summary>
     [MaxLength(512)]
     public string EvmHtlcAddress { get; set; }
+
+    /// <summary>
+    /// For EVM→BTC flows: the HTLCCoordinator contract address.
+    /// </summary>
+    [MaxLength(128)]
+    public string EvmCoordinatorAddress { get; set; }
+
+    /// <summary>
+    /// For gasless EVM→BTC flows: the SDK-derived deposit address where the sender sends tokens.
+    /// This is NOT the HTLC — it's an intermediary address the plugin can sign for via Permit2.
+    /// </summary>
+    [MaxLength(128)]
+    public string EvmDepositAddress { get; set; }
+
+    /// <summary>
+    /// Whether this EVM→BTC swap uses gasless mode (plugin signs Permit2 and server submits TX).
+    /// </summary>
+    public bool EvmGasless { get; set; }
 
     /// <summary>
     /// Source amount in token's smallest units (for EVM→BTC: how much EVM tokens to send).

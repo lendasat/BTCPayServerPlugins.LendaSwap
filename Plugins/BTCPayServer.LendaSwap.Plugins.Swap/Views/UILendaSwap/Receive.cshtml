@@ -136,18 +136,8 @@
                 </div>
             </div>
 
-            <div class="bg-tile rounded p-4 mb-4">
-                <h4 class="mb-3">Sender's EVM Address</h4>
-                <div class="form-group">
-                    <label asp-for="ClaimDestination" class="form-label" id="destinationLabel">EVM Address</label>
-                    <input asp-for="ClaimDestination" class="form-control" id="claimDestination" placeholder="0x..." />
-                    <span asp-validation-for="ClaimDestination" class="text-danger"></span>
-                    <div class="text-secondary mt-1 small">
-                        The EVM address (0x...) that will fund the swap. After creating the swap,
-                        this address needs to send tokens to the EVM HTLC contract.
-                    </div>
-                </div>
-            </div>
+            <!-- Deposit address is derived automatically from the store wallet (gasless mode) -->
+            <input type="hidden" asp-for="ClaimDestination" id="claimDestination" value="gasless" />
 
         </div>
     </div>
@@ -171,9 +161,6 @@
 
                     <dt class="col-sm-5">Fees</dt>
                     <dd class="col-sm-7" id="confirmFees">--</dd>
-
-                    <dt class="col-sm-5">From address</dt>
-                    <dd class="col-sm-7 text-break" id="confirmSender">--</dd>
 
                     <dt class="col-sm-5">Receive via</dt>
                     <dd class="col-sm-7" id="confirmVia">--</dd>
@@ -218,7 +205,6 @@
     var confirmSend = document.getElementById('confirmSend');
     var confirmReceive = document.getElementById('confirmReceive');
     var confirmFees = document.getElementById('confirmFees');
-    var confirmSender = document.getElementById('confirmSender');
     var confirmVia = document.getElementById('confirmVia');
     var confirmBtn = document.getElementById('confirmBtn');
 
@@ -353,14 +339,12 @@
     submitBtn.addEventListener('click', function () {
         var amount = parseInt(amountInput.value, 10);
         if (!amount || amount <= 0) { amountInput.focus(); return; }
-        if (!claimDestination.value) { claimDestination.focus(); return; }
         if (!sourceChainInput.value) { sourceSelect.focus(); return; }
 
         confirmSend.textContent = lastQuoteData && lastQuoteData.sourceAmount ? lastQuoteData.sourceAmount : '--';
         confirmReceive.textContent = amount.toLocaleString() + ' sats';
         var totalFees = lastQuoteData ? ((lastQuoteData.protocolFee || 0) + (lastQuoteData.networkFee || 0)) : 0;
         confirmFees.textContent = totalFees.toLocaleString() + ' sats';
-        confirmSender.textContent = claimDestination.value;
         confirmVia.textContent = targetChainInput.value;
 
         if (!confirmModal && typeof bootstrap !== 'undefined') confirmModal = new bootstrap.Modal(confirmModalEl);

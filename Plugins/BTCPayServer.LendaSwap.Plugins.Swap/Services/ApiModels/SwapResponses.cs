@@ -424,6 +424,84 @@ public class GetSwapResponse : SwapResponseBase
     public string ArkadeFundTxid { get; set; }
 }
 
+public class Permit2FundingCalldataResponse
+{
+    [JsonProperty("coordinator_address")]
+    public string CoordinatorAddress { get; set; }
+
+    [JsonProperty("permit2_address")]
+    public string Permit2Address { get; set; }
+
+    [JsonProperty("source_token_address")]
+    public string SourceTokenAddress { get; set; }
+
+    [JsonProperty("source_amount")]
+    public long SourceAmount { get; set; }
+
+    [JsonProperty("lock_token_address")]
+    public string LockTokenAddress { get; set; }
+
+    [JsonProperty("preimage_hash")]
+    public string PreimageHash { get; set; }
+
+    [JsonProperty("claim_address")]
+    public string ClaimAddress { get; set; }
+
+    [JsonProperty("timelock")]
+    public long Timelock { get; set; }
+
+    [JsonProperty("calls")]
+    public List<Permit2Call> Calls { get; set; }
+
+    [JsonProperty("calls_hash")]
+    public string CallsHash { get; set; }
+
+    [JsonProperty("eip2612")]
+    public Eip2612Data Eip2612 { get; set; }
+
+    [JsonProperty("relay_fee")]
+    public string RelayFee { get; set; }
+}
+
+public class Permit2Call
+{
+    [JsonProperty("target")]
+    public string Target { get; set; }
+
+    [JsonProperty("value")]
+    public string Value { get; set; }
+
+    [JsonProperty("call_data")]
+    public string CallData { get; set; }
+}
+
+public class Eip2612Data
+{
+    [JsonProperty("supported")]
+    public bool Supported { get; set; }
+
+    [JsonProperty("already_approved")]
+    public bool AlreadyApproved { get; set; }
+
+    [JsonProperty("nonce")]
+    public long Nonce { get; set; }
+
+    [JsonProperty("domain_separator")]
+    public string DomainSeparator { get; set; }
+}
+
+public class FundGaslessResponse
+{
+    [JsonProperty("id")]
+    public string Id { get; set; }
+
+    [JsonProperty("tx_hash")]
+    public string TxHash { get; set; }
+
+    [JsonProperty("message")]
+    public string Message { get; set; }
+}
+
 public class ClaimGaslessResponse
 {
     [JsonProperty("id")]

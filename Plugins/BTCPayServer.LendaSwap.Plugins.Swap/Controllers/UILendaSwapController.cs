@@ -162,9 +162,7 @@ public class UILendaSwapController(
     [HttpGet("receive")]
     public async Task<IActionResult> Receive(string storeId)
     {
-        var storeSettings = await dbContextFactory.GetSettingAsync(storeId);
         PopulateWalletStatus();
-        ViewData["DefaultEvmAddress"] = storeSettings.DefaultEvmAddress ?? storeSettings.DefaultPolygonAddress ?? "";
 
         var tokens = await FetchTokensSafe();
         var model = new CreateSwapViewModel
@@ -173,7 +171,6 @@ public class UILendaSwapController(
             SourceToken = "",
             TargetChain = "Lightning",
             TargetToken = "btc",
-            ClaimDestination = storeSettings.DefaultEvmAddress ?? storeSettings.DefaultPolygonAddress,
             BtcTokens = tokens.BtcTokens,
             EvmTokens = tokens.EvmTokens
         };

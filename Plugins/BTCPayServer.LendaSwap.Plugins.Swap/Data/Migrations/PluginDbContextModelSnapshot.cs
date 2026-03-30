@@ -60,6 +60,17 @@ namespace BTCPayServer.LendaSwap.Plugins.Swap.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<string>("EvmCoordinatorAddress")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("EvmDepositAddress")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<bool>("EvmGasless")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("EvmHtlcAddress")
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");

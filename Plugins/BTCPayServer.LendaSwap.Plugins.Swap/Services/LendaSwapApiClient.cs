@@ -112,6 +112,28 @@ public class LendaSwapApiClient(HttpClient httpClient)
         return JsonConvert.DeserializeObject<GetSwapResponse>(json);
     }
 
+    // --- Permit2 Funding Calldata ---
+
+    public async Task<Permit2FundingCalldataResponse> GetPermit2FundingCalldata(
+        string swapId, CancellationToken ct = default)
+    {
+        var response = await httpClient.GetAsync($"/swap/{swapId}/swap-and-lock-calldata-permit2", ct);
+        await EnsureSuccess(response, ct);
+        var json = await response.Content.ReadAsStringAsync(ct);
+        return JsonConvert.DeserializeObject<Permit2FundingCalldataResponse>(json);
+    }
+
+    // --- Gasless Fund ---
+
+    public async Task<FundGaslessResponse> FundGasless(
+        string swapId, FundGaslessRequest request, CancellationToken ct = default)
+    {
+        var response = await httpClient.PostAsync($"/swap/{swapId}/fund-gasless", ToJsonContent(request), ct);
+        await EnsureSuccess(response, ct);
+        var json = await response.Content.ReadAsStringAsync(ct);
+        return JsonConvert.DeserializeObject<FundGaslessResponse>(json);
+    }
+
     // --- Gasless Claim (was Gelato) ---
 
     public async Task<ClaimGaslessResponse> ClaimGasless(

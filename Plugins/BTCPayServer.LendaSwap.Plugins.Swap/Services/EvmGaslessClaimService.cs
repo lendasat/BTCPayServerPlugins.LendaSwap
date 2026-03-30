@@ -191,6 +191,221 @@ public class EvmGaslessClaimService(
     }
 
     /// <summary>
+    /// Funds a gasless EVM→BTC swap by signing a Permit2 message and calling fund-gasless.
+    /// </summary>
+    public async Task<(bool success, string txHash, string error)> TryGaslessFund(
+        StoreData store, SwapRecord swap, CancellationToken ct)
+    {
+        var evmKey = await DeriveEvmKey(store, ct);
+        if (evmKey == null)
+            return (false, null, "Cannot derive EVM key from store wallet");
+
+        var (privateKey, evmAddress) = evmKey.Value;
+
+        try
+        {
+            // 1. Get Permit2 funding calldata from LendaSwap API
+            var calldata = await apiClient.GetPermit2FundingCalldata(swap.LendaSwapId, ct);
+
+            // 2. Generate nonce and deadline
+            var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
+            var nonceBytes = new byte[32];
+            rng.GetBytes(nonceBytes);
+            var nonce = new BigInteger(nonceBytes, isUnsigned: true, isBigEndian: true);
+            var deadline = DateTimeOffset.UtcNow.AddMinutes(30).ToUnixTimeSeconds();
+
+            // 3. Parse chain ID from swap's source chain
+            if (!long.TryParse(swap.SourceChain, out var chainId))
+                return (false, null, $"Cannot parse chain ID from '{swap.SourceChain}'");
+
+            // 4. Sign the Permit2 PermitWitnessTransferFrom EIP-712 digest
+            var signature = SignPermit2Funding(
+                privateKey, chainId,
+                calldata.SourceTokenAddress, (ulong)calldata.SourceAmount,
+                calldata.CoordinatorAddress, nonce, deadline,
+                calldata.PreimageHash, calldata.LockTokenAddress,
+                calldata.ClaimAddress, calldata.CoordinatorAddress,
+                calldata.Timelock, calldata.CallsHash);
+
+            // 5. Build EIP-2612 permit if needed (token approval to Permit2)
+            Eip2612Permit eip2612Permit = null;
+            if (calldata.Eip2612 is { Supported: true, AlreadyApproved: false })
+            {
+                var permitSig = SignEip2612Permit(
+                    privateKey, calldata.Eip2612.DomainSeparator,
+                    evmAddress, "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+                    calldata.Eip2612.Nonce, deadline);
+                eip2612Permit = new Eip2612Permit
+                {
+                    V = permitSig.v,
+                    R = "0x" + Convert.ToHexString(permitSig.r).ToLowerInvariant(),
+                    S = "0x" + Convert.ToHexString(permitSig.s).ToLowerInvariant(),
+                    Value = (BigInteger.Pow(2, 256) - 1).ToString(), // max uint256
+                    Deadline = deadline
+                };
+            }
+
+            // 6. Call fund-gasless
+            var result = await apiClient.FundGasless(swap.LendaSwapId, new FundGaslessRequest
+            {
+                Permit2Nonce = nonce.ToString(),
+                Permit2Deadline = deadline,
+                Permit2Signature = signature,
+                Calls = calldata.Calls,
+                Eip2612Permit = eip2612Permit
+            }, ct);
+
+            return (true, result.TxHash, null);
+        }
+        catch (LendaSwapApiException ex) when (ex.StatusCode == 422 || ex.StatusCode == 400)
+        {
+            // Likely "no balance" or "swap not ready" — don't retry immediately
+            return (false, null, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return (false, null, $"fund-gasless failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Signs the Permit2 PermitWitnessTransferFrom EIP-712 digest for HTLC funding.
+    /// </summary>
+    private static string SignPermit2Funding(
+        byte[] privateKey, long chainId,
+        string sourceToken, ulong sourceAmount,
+        string coordinatorAddress, BigInteger nonce, long deadline,
+        string preimageHash, string lockToken,
+        string claimAddress, string refundAddress,
+        long timelock, string callsHash)
+    {
+        var sha3 = new Sha3Keccack();
+
+        // Permit2 domain separator
+        var domainTypeHash = sha3.CalculateHash(
+            System.Text.Encoding.UTF8.GetBytes("EIP712Domain(string name,uint256 chainId,address verifyingContract)"));
+        var nameHash = sha3.CalculateHash(System.Text.Encoding.UTF8.GetBytes("Permit2"));
+        const string permit2Address = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
+
+        var domainData = new byte[32 * 4];
+        Array.Copy(domainTypeHash, 0, domainData, 0, 32);
+        Array.Copy(nameHash, 0, domainData, 32, 32);
+        AbiEncodeUint256(new BigInteger(chainId)).CopyTo(domainData, 64);
+        AbiEncodeAddress(permit2Address).CopyTo(domainData, 96);
+        var domainSeparator = sha3.CalculateHash(domainData);
+
+        // TokenPermissions hash
+        var tokenPermTypeHash = sha3.CalculateHash(
+            System.Text.Encoding.UTF8.GetBytes("TokenPermissions(address token,uint256 amount)"));
+        var tokenPermData = new byte[32 * 3];
+        Array.Copy(tokenPermTypeHash, 0, tokenPermData, 0, 32);
+        AbiEncodeAddress(sourceToken).CopyTo(tokenPermData, 32);
+        AbiEncodeUint256(new BigInteger(sourceAmount)).CopyTo(tokenPermData, 64);
+        var tokenPermHash = sha3.CalculateHash(tokenPermData);
+
+        // ExecuteAndCreate witness hash
+        var witnessTypeHash = sha3.CalculateHash(
+            System.Text.Encoding.UTF8.GetBytes(
+                "ExecuteAndCreate(bytes32 preimageHash,address token,address claimAddress,address refundAddress,uint256 timelock,bytes32 callsHash)"));
+        var preimageHashBytes = Convert.FromHexString(preimageHash.StartsWith("0x") ? preimageHash[2..] : preimageHash);
+        var callsHashBytes = Convert.FromHexString(callsHash.StartsWith("0x") ? callsHash[2..] : callsHash);
+
+        var witnessData = new byte[32 * 7];
+        Array.Copy(witnessTypeHash, 0, witnessData, 0, 32);
+        Array.Copy(PadTo32(preimageHashBytes), 0, witnessData, 32, 32);
+        AbiEncodeAddress(lockToken).CopyTo(witnessData, 64);
+        AbiEncodeAddress(claimAddress).CopyTo(witnessData, 96);
+        AbiEncodeAddress(refundAddress).CopyTo(witnessData, 128);
+        AbiEncodeUint256(new BigInteger(timelock)).CopyTo(witnessData, 160);
+        Array.Copy(PadTo32(callsHashBytes), 0, witnessData, 192, 32);
+        var witnessHash = sha3.CalculateHash(witnessData);
+
+        // PermitWitnessTransferFrom struct hash
+        var permitWitnessTypeHash = sha3.CalculateHash(
+            System.Text.Encoding.UTF8.GetBytes(
+                "PermitWitnessTransferFrom(TokenPermissions permitted,address spender,uint256 nonce,uint256 deadline,ExecuteAndCreate witness)ExecuteAndCreate(bytes32 preimageHash,address token,address claimAddress,address refundAddress,uint256 timelock,bytes32 callsHash)TokenPermissions(address token,uint256 amount)"));
+
+        var structData = new byte[32 * 6];
+        Array.Copy(permitWitnessTypeHash, 0, structData, 0, 32);
+        Array.Copy(tokenPermHash, 0, structData, 32, 32);
+        AbiEncodeAddress(coordinatorAddress).CopyTo(structData, 64);
+        AbiEncodeUint256(nonce).CopyTo(structData, 96);
+        AbiEncodeUint256(new BigInteger(deadline)).CopyTo(structData, 128);
+        Array.Copy(witnessHash, 0, structData, 160, 32);
+        var structHash = sha3.CalculateHash(structData);
+
+        // Final EIP-712 digest
+        var digestInput = new byte[2 + 32 + 32];
+        digestInput[0] = 0x19;
+        digestInput[1] = 0x01;
+        Array.Copy(domainSeparator, 0, digestInput, 2, 32);
+        Array.Copy(structHash, 0, digestInput, 34, 32);
+        var digest = sha3.CalculateHash(digestInput);
+
+        // Sign
+        var ecPrivKey = ECPrivKey.Create(privateKey);
+        ecPrivKey.TrySignRecoverable(digest, out var recSig);
+        Scalar rScalar = default, sScalar = default;
+        int recId = 0;
+        recSig.Deconstruct(out rScalar, out sScalar, out recId);
+
+        var sigBytes = new byte[65];
+        rScalar.WriteToSpan(sigBytes.AsSpan(0, 32));
+        sScalar.WriteToSpan(sigBytes.AsSpan(32, 32));
+        sigBytes[64] = (byte)(27 + recId);
+
+        return "0x" + Convert.ToHexString(sigBytes).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Signs an EIP-2612 Permit for token approval to Permit2.
+    /// </summary>
+    private static (int v, byte[] r, byte[] s) SignEip2612Permit(
+        byte[] privateKey, string domainSeparatorHex,
+        string owner, string spender, long nonce, long deadline)
+    {
+        var sha3 = new Sha3Keccack();
+        var domainSeparator = Convert.FromHexString(
+            domainSeparatorHex.StartsWith("0x") ? domainSeparatorHex[2..] : domainSeparatorHex);
+
+        var permitTypeHash = sha3.CalculateHash(
+            System.Text.Encoding.UTF8.GetBytes(
+                "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"));
+
+        // max uint256
+        var maxValue = BigInteger.Pow(2, 256) - 1;
+
+        var structData = new byte[32 * 6];
+        Array.Copy(permitTypeHash, 0, structData, 0, 32);
+        AbiEncodeAddress(owner).CopyTo(structData, 32);
+        AbiEncodeAddress(spender).CopyTo(structData, 64);
+        AbiEncodeUint256(maxValue).CopyTo(structData, 96);
+        AbiEncodeUint256(new BigInteger(nonce)).CopyTo(structData, 128);
+        AbiEncodeUint256(new BigInteger(deadline)).CopyTo(structData, 160);
+        var structHash = sha3.CalculateHash(structData);
+
+        var digestInput = new byte[2 + 32 + 32];
+        digestInput[0] = 0x19;
+        digestInput[1] = 0x01;
+        Array.Copy(domainSeparator, 0, digestInput, 2, 32);
+        Array.Copy(structHash, 0, digestInput, 34, 32);
+        var digest = sha3.CalculateHash(digestInput);
+
+        var ecPrivKey = ECPrivKey.Create(privateKey);
+        ecPrivKey.TrySignRecoverable(digest, out var recSig);
+        Scalar rScalar = default, sScalar = default;
+        int recId = 0;
+        recSig.Deconstruct(out rScalar, out sScalar, out recId);
+
+        var rBytes = new byte[32];
+        var sBytes = new byte[32];
+        rScalar.WriteToSpan(rBytes);
+        sScalar.WriteToSpan(sBytes);
+
+        return (27 + recId, rBytes, sBytes);
+    }
+
+    /// <summary>
     /// Signs the EIP-712 Redeem struct using NBitcoin.Secp256k1.
     /// </summary>
     private static (int v, byte[] r, byte[] s) SignRedeemEip712(

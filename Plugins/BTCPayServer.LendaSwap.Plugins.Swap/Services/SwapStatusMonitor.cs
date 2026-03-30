@@ -84,7 +84,30 @@ public class SwapStatusMonitor(
         switch (remoteStatus)
         {
             case "pending":
-                swap.Status = SwapStatus.PendingPayment;
+                // For gasless EVM→BTC/Lightning swaps, the server doesn't report "depositseen" —
+                // it waits for the plugin to call fund-gasless. Try funding on every poll cycle;
+                // the call is idempotent and fails gracefully if the deposit hasn't arrived yet.
+                if (swap.EvmGasless && swap.Status == SwapStatus.PendingPayment
+                    && swap.SwapType is SwapType.EvmToBitcoin or SwapType.EvmToLightning)
+                {
+                    await TryAutoFundGasless(swap, ct);
+                }
+                else
+                {
+                    swap.Status = SwapStatus.PendingPayment;
+                }
+                break;
+
+            case "depositseen":
+            case "depositconfirmed":
+                // Gasless EVM→BTC: tokens arrived at deposit address → auto-fund via Permit2
+                if (swap.EvmGasless && swap.Status == SwapStatus.PendingPayment)
+                {
+                    logger.LogInformation("Tokens deposited for gasless swap {SwapId}, triggering auto-fund", swap.Id);
+                    swap.Status = SwapStatus.Processing;
+                    await db.SaveChangesAsync(ct);
+                    await TryAutoFundGasless(swap, ct);
+                }
                 break;
 
             case "clientfundingseen":
@@ -94,7 +117,6 @@ public class SwapStatusMonitor(
                 swap.Status = swap.SwapType switch
                 {
                     SwapType.EvmToLightning or SwapType.EvmToBitcoin => SwapStatus.Processing,
-                    // For LN→EVM, clientfunded means our LN payment arrived, server will fund EVM next
                     SwapType.LightningToEvm or SwapType.BitcoinToEvm => SwapStatus.Processing,
                     _ => SwapStatus.PendingPayment
                 };
@@ -183,6 +205,49 @@ public class SwapStatusMonitor(
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Signs Permit2 and calls fund-gasless to move tokens from deposit address into the HTLC.
+    /// </summary>
+    private async Task TryAutoFundGasless(SwapRecord swap, CancellationToken ct)
+    {
+        try
+        {
+            await using var scope = serviceScopeFactory.CreateAsyncScope();
+            var storeRepo = scope.ServiceProvider.GetRequiredService<StoreRepository>();
+            var store = await storeRepo.FindStore(swap.StoreId);
+            if (store == null)
+            {
+                logger.LogWarning("Store {StoreId} not found for gasless fund {SwapId}", swap.StoreId, swap.Id);
+                return;
+            }
+
+            var evmClaimService = scope.ServiceProvider.GetRequiredService<EvmGaslessClaimService>();
+            var (success, txHash, error) = await evmClaimService.TryGaslessFund(store, swap, ct);
+
+            await using var db = dbContextFactory.CreateContext();
+            db.SwapRecords.Attach(swap);
+
+            if (success)
+            {
+                swap.GaslessTxHash = txHash;
+                swap.ErrorMessage = null;
+                logger.LogInformation("Gasless fund succeeded for swap {SwapId}, TxHash: {TxHash}", swap.Id, txHash);
+            }
+            else
+            {
+                swap.Status = SwapStatus.PendingPayment;
+                swap.ErrorMessage = $"Gasless fund failed: {error}";
+                logger.LogWarning("Gasless fund failed for swap {SwapId}: {Error}", swap.Id, error);
+            }
+
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Exception during gasless fund for swap {SwapId}", swap.Id);
+        }
     }
 
     /// <summary>

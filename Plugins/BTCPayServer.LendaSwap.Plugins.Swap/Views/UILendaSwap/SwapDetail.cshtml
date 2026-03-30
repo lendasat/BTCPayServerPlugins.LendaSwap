@@ -35,6 +35,7 @@
     var isTerminal = Model.Status is SwapStatus.Completed or SwapStatus.Failed or SwapStatus.Expired;
     var isProcessing = Model.Status is SwapStatus.Processing or SwapStatus.PendingClaim or SwapStatus.Claiming or SwapStatus.PayingFromWallet;
     var needsEvmFunding = isEvmToBtc && Model.Status == SwapStatus.PendingPayment && !string.IsNullOrEmpty(Model.EvmHtlcAddress);
+    var hasGaslessDeposit = isEvmToBtc && Model.EvmGasless && !string.IsNullOrEmpty(Model.EvmDepositAddress);
     var needsManualPay = !isEvmToBtc && Model.Status == SwapStatus.PendingPayment && !string.IsNullOrEmpty(Model.PaymentAddress);
     var qrData = needsManualPay
         ? (isLightningSwap
@@ -131,50 +132,70 @@
             </div>
         }
 
-        <!-- EVM→BTC: Show EVM HTLC funding instructions -->
+        <!-- EVM→BTC: Show deposit address (gasless) or HTLC funding instructions -->
         @if (needsEvmFunding)
         {
-            <div class="alert alert-warning">
-                <h5 class="alert-heading mb-2">Action Required: Fund the EVM HTLC</h5>
-                <p class="mb-2">
-                    Send <strong>@(Model.SourceAmountRaw ?? "the required amount of") tokens</strong>
-                    to the EVM HTLC contract from your EVM wallet.
-                    @if (Model.SwapType == SwapType.EvmToLightning)
-                    {
-                        <span>Once funded, the server will automatically pay the Lightning invoice to your store. <strong>No further action needed after funding.</strong></span>
-                    }
-                    else
-                    {
-                        <span>Once funded, the server will send BTC to a Taproot HTLC for you to claim.</span>
-                    }
-                </p>
-                <div class="mb-2">
-                    <strong>EVM HTLC Contract Address:</strong><br/>
-                    <div class="d-flex align-items-center gap-2 mt-1">
-                        <code class="text-break user-select-all">@Model.EvmHtlcAddress</code>
-                        <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.EvmHtlcAddress" title="Copy">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        </button>
+            var receiveMethod = Model.SwapType == SwapType.EvmToLightning ? "on Lightning" : "on Bitcoin";
+            @if (hasGaslessDeposit)
+            {
+                <div class="alert alert-warning">
+                    <h5 class="alert-heading mb-2">Waiting for Payment</h5>
+                    <p class="mb-2">
+                        Send <strong>@(Model.SourceAmountRaw ?? "the required") tokens</strong> to the
+                        deposit address below. Once the tokens arrive, the swap will be completed automatically.
+                    </p>
+                    <div class="text-center my-3">
+                        <vc:qr-code data="@Model.EvmDepositAddress" />
                     </div>
-                </div>
-                @if (!string.IsNullOrEmpty(Model.SourceAmountRaw))
-                {
                     <div class="mb-2">
-                        <strong>Amount to send:</strong> @Model.SourceAmountRaw (in token's smallest unit)
+                        <strong>Deposit Address:</strong><br/>
+                        <div class="d-flex align-items-center gap-2 mt-1">
+                            <code class="text-break user-select-all">@Model.EvmDepositAddress</code>
+                            <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.EvmDepositAddress" title="Copy">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </div>
                     </div>
-                }
-                <div class="text-secondary small">
-                    <strong>You will receive:</strong> @Model.AmountSats.ToString("N0") sats
-                    @if (Model.SwapType == SwapType.EvmToLightning)
+                    @if (!string.IsNullOrEmpty(Model.SourceAmountRaw))
                     {
-                        <span>on Lightning</span>
+                        <div class="mb-2">
+                            <strong>Amount:</strong> @Model.SourceAmountRaw (in token's smallest unit)
+                        </div>
                     }
-                    else
-                    {
-                        <span>on Bitcoin</span>
-                    }
+                    <div class="text-secondary small">
+                        <strong>You will receive:</strong> @Model.AmountSats.ToString("N0") sats @receiveMethod
+                    </div>
                 </div>
-            </div>
+            }
+            else
+            {
+                <div class="alert alert-warning">
+                    <h5 class="alert-heading mb-2">Action Required: Fund the Swap</h5>
+                    <p class="mb-2">
+                        Fund this swap using the
+                        <a href="https://lendaswap.com" target="_blank" rel="noopener">LendaSwap app</a>
+                        or a compatible EVM wallet via the HTLCCoordinator contract.
+                    </p>
+                    <div class="mb-2">
+                        <strong>HTLC Contract:</strong><br/>
+                        <div class="d-flex align-items-center gap-2 mt-1">
+                            <code class="text-break user-select-all">@(Model.EvmCoordinatorAddress ?? Model.EvmHtlcAddress)</code>
+                            <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@(Model.EvmCoordinatorAddress ?? Model.EvmHtlcAddress)" title="Copy">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrEmpty(Model.SourceAmountRaw))
+                    {
+                        <div class="mb-2">
+                            <strong>Amount:</strong> @Model.SourceAmountRaw (in token's smallest unit)
+                        </div>
+                    }
+                    <div class="text-secondary small">
+                        <strong>You will receive:</strong> @Model.AmountSats.ToString("N0") sats @receiveMethod
+                    </div>
+                </div>
+            }
         }
 
         <!-- EVM→BTC: Processing status -->
@@ -486,6 +507,19 @@
                         <code>—</code>
                     }
                 </dd>
+
+                @if (!string.IsNullOrEmpty(Model.EvmCoordinatorAddress))
+                {
+                    <dt class="col-sm-4">Coordinator Address</dt>
+                    <dd class="col-sm-8">
+                        <div class="d-flex align-items-center gap-2">
+                            <code class="text-break">@Model.EvmCoordinatorAddress</code>
+                            <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.EvmCoordinatorAddress" title="Copy">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            </button>
+                        </div>
+                    </dd>
+                }
 
                 @if (!string.IsNullOrEmpty(Model.TargetHtlcAddress))
                 {

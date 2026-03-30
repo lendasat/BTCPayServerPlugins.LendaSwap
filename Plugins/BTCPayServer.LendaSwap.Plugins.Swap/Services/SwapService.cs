@@ -102,15 +102,19 @@ public class SwapService(
             return (null, "A Bitcoin wallet must be configured for this store to create swaps. Configure an onchain hot wallet in your store settings.");
 
         // Validate destination address format
-        if (string.IsNullOrWhiteSpace(model.ClaimDestination))
-            return (null, "Destination address is required.");
-
-        if (IsEvmChain(model.TargetChain) || IsEvmChain(model.SourceChain))
+        // For EVM→BTC (receive) swaps, the deposit address is derived from the store wallet (gasless mode)
+        var isEvmToBtcSwap = IsEvmChain(model.SourceChain) && !IsEvmChain(model.TargetChain);
+        if (!isEvmToBtcSwap)
         {
-            // Basic EVM address validation: 0x + 40 hex chars
-            var addr = model.ClaimDestination.Trim();
-            if (!addr.StartsWith("0x", StringComparison.OrdinalIgnoreCase) || addr.Length != 42)
-                return (null, "Invalid EVM address format. Expected 0x followed by 40 hex characters.");
+            if (string.IsNullOrWhiteSpace(model.ClaimDestination))
+                return (null, "Destination address is required.");
+
+            if (IsEvmChain(model.TargetChain))
+            {
+                var addr = model.ClaimDestination.Trim();
+                if (!addr.StartsWith("0x", StringComparison.OrdinalIgnoreCase) || addr.Length != 42)
+                    return (null, "Invalid EVM address format. Expected 0x followed by 40 hex characters.");
+            }
         }
 
         var preimage = cryptoHelper.GeneratePreimage();
@@ -119,13 +123,16 @@ public class SwapService(
         logger.LogInformation("Creating {SwapType} swap for store {StoreId}, amount {Amount} sats",
             swapType, storeId, model.AmountSats);
 
+        // For EVM→BTC receive swaps, ClaimDestination is "this store" (gasless mode derives deposit address)
+        var claimDest = isEvmToBtcSwap ? "Store Lightning/Onchain wallet" : model.ClaimDestination;
+
         var swap = new SwapRecord
         {
             StoreId = storeId,
             SwapType = swapType.Value,
             Status = SwapStatus.Created,
             AmountSats = model.AmountSats,
-            ClaimDestination = model.ClaimDestination,
+            ClaimDestination = claimDest,
             SourceToken = model.SourceToken,
             TargetToken = model.TargetToken,
             SourceChain = model.SourceChain,
@@ -156,7 +163,7 @@ public class SwapService(
                     await CreateEvmToLightningSwap(swap, model, store, pubKeyHex, ct);
                     break;
                 case SwapType.EvmToBitcoin:
-                    await CreateEvmToBitcoinSwap(swap, model, pubKeyHex, preimage, ct);
+                    await CreateEvmToBitcoinSwap(swap, model, store, pubKeyHex, preimage, ct);
                     break;
             }
         }
@@ -295,19 +302,33 @@ public class SwapService(
             return;
         }
 
+        // Derive a deterministic EVM address from the store's wallet seed.
+        // In gasless mode, this becomes the deposit address where the sender sends tokens.
+        // The plugin holds the private key and can sign Permit2 to fund the HTLC.
+        var evmKey = await evmClaimService.DeriveEvmKey(store, ct);
+        if (evmKey == null)
+        {
+            swap.Status = SwapStatus.Failed;
+            swap.ErrorMessage = "Could not derive EVM key from store wallet. Ensure a hot wallet is configured.";
+            return;
+        }
+
         var result = await apiClient.CreateEvmToLightningSwap(new EvmToLightningSwapRequest
         {
             LightningInvoice = invoice.bolt11,
             EvmChainId = ParseEvmChainId(model.SourceChain),
             TokenAddress = model.SourceToken,
-            UserAddress = model.ClaimDestination,
+            UserAddress = evmKey.Value.evmAddress,
             UserId = pubKeyHex,
-            Gasless = false
+            Gasless = true
         }, ct);
 
         swap.LendaSwapId = result.Id;
         swap.PaymentHash = result.HashLock;
         swap.EvmHtlcAddress = result.EvmHtlcAddress;
+        swap.EvmCoordinatorAddress = result.EvmCoordinatorAddress;
+        swap.EvmDepositAddress = result.ClientEvmAddress;
+        swap.EvmGasless = true;
         swap.SourceAmountRaw = result.SourceAmount;
         swap.TargetHtlcAddress = result.ClientLightningInvoice;
         swap.HtlcExpiryBlock = result.EvmRefundLocktime;
@@ -320,11 +341,19 @@ public class SwapService(
     /// After user funds EVM HTLC, server sends BTC to a Taproot HTLC that the plugin can claim.
     /// </summary>
     private async Task CreateEvmToBitcoinSwap(
-        SwapRecord swap, CreateSwapViewModel model, string pubKeyHex,
+        SwapRecord swap, CreateSwapViewModel model, StoreData store, string pubKeyHex,
         byte[] preimage, CancellationToken ct)
     {
         var paymentHash = cryptoHelper.ComputePaymentHash(preimage);
         swap.PaymentHash = paymentHash;
+
+        var evmKey = await evmClaimService.DeriveEvmKey(store, ct);
+        if (evmKey == null)
+        {
+            swap.Status = SwapStatus.Failed;
+            swap.ErrorMessage = "Could not derive EVM key from store wallet. Ensure a hot wallet is configured.";
+            return;
+        }
 
         var result = await apiClient.CreateEvmToBitcoinSwap(new EvmToBitcoinSwapRequest
         {
@@ -332,14 +361,17 @@ public class SwapService(
             AmountOut = model.AmountSats,
             EvmChainId = ParseEvmChainId(model.SourceChain),
             TokenAddress = model.SourceToken,
-            UserAddress = model.ClaimDestination,
+            UserAddress = evmKey.Value.evmAddress,
             ClaimPk = pubKeyHex,
             UserId = pubKeyHex,
-            Gasless = false
+            Gasless = true
         }, ct);
 
         swap.LendaSwapId = result.Id;
         swap.EvmHtlcAddress = result.EvmHtlcAddress;
+        swap.EvmCoordinatorAddress = result.EvmCoordinatorAddress;
+        swap.EvmDepositAddress = result.ClientEvmAddress;
+        swap.EvmGasless = true;
         swap.SourceAmountRaw = result.SourceAmount;
         swap.TargetHtlcAddress = result.BtcHtlcAddress;
         swap.HtlcExpiryBlock = result.BtcRefundLocktime;
