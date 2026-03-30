@@ -19,6 +19,8 @@ public class LendaSwapPlugin : BaseBTCPayServerPlugin
     {
         services.AddUIExtension("store-integrations-nav", "LendaSwapNav");
         services.AddUIExtension("onchain-wallet-send", "LendaSwapWalletSend");
+        services.AddUIExtension("wallet-nav", "LendaSwapWalletNav");
+        services.AddUIExtension("lightning-nav", "LendaSwapLightningNav");
 
         services.AddSingleton<PluginDbContextFactory>();
         services.AddDbContext<PluginDbContext>((provider, o) =>

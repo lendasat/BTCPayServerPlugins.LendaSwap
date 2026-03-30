@@ -1,0 +1,19 @@
+@using BTCPayServer.Components.MainNav
+@model MainNavViewModel
+@{
+    var storeId = Model?.Store?.Id;
+    if (string.IsNullOrEmpty(storeId)) return;
+}
+
+<li class="nav-item nav-item-sub">
+    <a asp-controller="UILendaSwap" asp-action="Send" asp-route-storeId="@storeId"
+       class="nav-link">
+        Swap Send
+    </a>
+</li>
+<li class="nav-item nav-item-sub">
+    <a asp-controller="UILendaSwap" asp-action="Receive" asp-route-storeId="@storeId"
+       class="nav-link">
+        Swap Receive
+    </a>
+</li>
