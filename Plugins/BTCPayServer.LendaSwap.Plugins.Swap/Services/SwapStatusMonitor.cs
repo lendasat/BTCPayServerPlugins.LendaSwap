@@ -88,7 +88,8 @@ public class SwapStatusMonitor(
                 // it waits for the plugin to call fund-gasless. Try funding on every poll cycle;
                 // the call is idempotent and fails gracefully if the deposit hasn't arrived yet.
                 if (swap.EvmGasless && swap.Status == SwapStatus.PendingPayment
-                    && swap.SwapType is SwapType.EvmToBitcoin or SwapType.EvmToLightning)
+                    && swap.SwapType is SwapType.EvmToBitcoin or SwapType.EvmToLightning
+                    && string.IsNullOrEmpty(swap.GaslessTxHash))
                 {
                     await TryAutoFundGasless(swap, ct);
                 }

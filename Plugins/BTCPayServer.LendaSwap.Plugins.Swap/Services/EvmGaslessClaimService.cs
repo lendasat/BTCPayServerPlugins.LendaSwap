@@ -94,6 +94,9 @@ public class EvmGaslessClaimService(
             return (false, null, "EVM HTLC details not yet available.");
         }
 
+        if (string.IsNullOrEmpty(swap.PreimageEncrypted))
+            return (false, null, "Preimage not stored for this swap");
+
         string preimageHex;
         try
         {
@@ -208,9 +211,7 @@ public class EvmGaslessClaimService(
             var calldata = await apiClient.GetPermit2FundingCalldata(swap.LendaSwapId, ct);
 
             // 2. Generate nonce and deadline
-            var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
-            var nonceBytes = new byte[32];
-            rng.GetBytes(nonceBytes);
+            var nonceBytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
             var nonce = new BigInteger(nonceBytes, isUnsigned: true, isBigEndian: true);
             var deadline = DateTimeOffset.UtcNow.AddMinutes(30).ToUnixTimeSeconds();
 
@@ -486,6 +487,8 @@ public class EvmGaslessClaimService(
     private static byte[] AbiEncodeUint256(BigInteger value)
     {
         var bytes = value.ToByteArray(isUnsigned: true, isBigEndian: true);
+        if (bytes.Length > 32)
+            throw new InvalidOperationException($"Value exceeds uint256 range ({bytes.Length} bytes)");
         var padded = new byte[32];
         Array.Copy(bytes, 0, padded, 32 - bytes.Length, bytes.Length);
         return padded;
