@@ -20,9 +20,9 @@
         SwapStatus.Claiming => "bg-primary",
         SwapStatus.PendingClaim => "bg-primary",
         SwapStatus.PayingFromWallet => "bg-info",
-        SwapStatus.PendingPayment => "bg-warning text-dark",
+        SwapStatus.PendingPayment => "bg-warning",
         SwapStatus.Processing => "bg-info",
-        _ => "bg-light text-dark"
+        _ => "bg-light"
     };
 
     var preimage = ViewData["Preimage"] as string;
@@ -57,7 +57,7 @@
     <div class="col-xl-10 col-xxl-constrain">
 
         <div class="d-flex align-items-center gap-3 mb-4">
-            <span class="badge @badgeClass fs-6">@Model.Status</span>
+            <span class="badge @badgeClass fs-6" @(Model.Status == SwapStatus.PendingPayment ? "style=\"color: #000 !important;\"" : "")>@Model.Status</span>
             <span class="badge bg-info fs-6">
                 @(Model.SwapType switch
                 {

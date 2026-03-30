@@ -94,11 +94,11 @@
                                     SwapStatus.PendingClaim => "bg-primary",
                                     SwapStatus.PayingFromWallet => "bg-info",
                                     SwapStatus.Processing => "bg-info",
-                                    SwapStatus.PendingPayment => "bg-warning text-dark",
-                                    _ => "bg-light text-dark"
+                                    SwapStatus.PendingPayment => "bg-warning",
+                                    _ => "bg-light"
                                 };
                             }
-                            <span class="badge @badgeClass">@swap.Status</span>
+                            <span class="badge @badgeClass" @(swap.Status == SwapStatus.PendingPayment ? "style=\"color: #000 !important;\"" : "")>@swap.Status</span>
                         </td>
                         <td>
                             <span class="text-truncate d-inline-block" style="max-width: 200px;" title="@swap.ClaimDestination">
