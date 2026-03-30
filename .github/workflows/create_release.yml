@@ -1,0 +1,66 @@
+name: Create Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [master]
+
+jobs:
+  release:
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Extract version
+        id: version
+        run: |
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          VERSION="${BRANCH#release/}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Release version: $VERSION"
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.414
+
+      - name: Build solution (Release)
+        run: dotnet build BTCPayServerPlugins.RockstarDev.sln -c Release -maxcpucount:1
+
+      - name: Package plugin
+        run: |
+          dotnet run --project submodules/btcpayserver/BTCPayServer.PluginPacker \
+            Plugins/BTCPayServer.LendaSwap.Plugins.Swap/bin/Release/net8.0 \
+            BTCPayServer.LendaSwap.Plugins.Swap \
+            ./artifacts
+
+      - name: List artifacts
+        run: find ./artifacts -type f | head -20
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: LendaSwap Plugin v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.btcpay
+            artifacts/**/*.btcpay.json
+          body: |
+            ## LendaSwap Plugin v${{ steps.version.outputs.version }}
+
+            ### Installation
+            1. Go to your BTCPayServer → Server Settings → Plugins
+            2. Upload the `.btcpay` file from this release
+            3. Restart BTCPayServer
+
+            ### Plugin Builder
+            To install via the marketplace, configure the plugin builder with:
+            - **Repository:** `${{ github.server_url }}/${{ github.repository }}`
+            - **Tag:** `v${{ steps.version.outputs.version }}`
+            - **Directory:** `Plugins/BTCPayServer.LendaSwap.Plugins.Swap`

@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.414
+
+      - name: Build solution
+        run: dotnet build BTCPayServerPlugins.RockstarDev.sln -c Release -maxcpucount:1
+
+      - name: Build plugin package
+        run: |
+          dotnet run --project submodules/btcpayserver/BTCPayServer.PluginPacker \
+            Plugins/BTCPayServer.LendaSwap.Plugins.Swap/bin/Release/net8.0 \
+            BTCPayServer.LendaSwap.Plugins.Swap \
+            ./artifacts
+          ls -la artifacts/

@@ -1,0 +1,69 @@
+name: Draft New Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.2.0)"
+        required: true
+        type: string
+
+jobs:
+  draft:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Validate version format
+        run: |
+          if ! echo "${{ inputs.version }}" | grep -qP '^\d+\.\d+\.\d+$'; then
+            echo "::error::Version must be in X.Y.Z format"
+            exit 1
+          fi
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.414
+
+      - name: Create release branch
+        run: |
+          git checkout -b release/${{ inputs.version }}
+
+      - name: Bump version in .csproj
+        run: |
+          sed -i 's|<Version>.*</Version>|<Version>${{ inputs.version }}</Version>|' \
+            Plugins/BTCPayServer.LendaSwap.Plugins.Swap/BTCPayServer.LendaSwap.Plugins.Swap.csproj
+
+      - name: Verify build
+        run: dotnet build BTCPayServerPlugins.RockstarDev.sln -c Release -maxcpucount:1
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Release version ${{ inputs.version }}"
+          git push origin release/${{ inputs.version }}
+
+      - name: Create PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --title "Release v${{ inputs.version }}" \
+            --body "$(cat <<'EOF'
+          ## Release v${{ inputs.version }}
+
+          Version bump and release preparation.
+
+          **When this PR is merged, a GitHub Release with the `.btcpay` plugin package will be created automatically.**
+          EOF
+          )" \
+            --base master \
+            --head release/${{ inputs.version }}
