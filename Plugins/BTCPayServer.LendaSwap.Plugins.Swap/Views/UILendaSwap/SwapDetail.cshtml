@@ -99,7 +99,7 @@
                 <div>
                     <h5 class="mb-1">Swap in progress</h5>
                     <p class="mb-0">@stepMessage</p>
-                    <small class="text-secondary">Status updates automatically every 2 seconds.</small>
+                    <small class="opacity-75">Status updates automatically.</small>
                 </div>
             </div>
         }
@@ -162,7 +162,7 @@
                             <strong>Amount:</strong> @Model.SourceAmountRaw (in token's smallest unit)
                         </div>
                     }
-                    <div class="text-secondary small">
+                    <div class="small mt-2">
                         <strong>You will receive:</strong> @Model.AmountSats.ToString("N0") sats @receiveMethod
                     </div>
                 </div>
@@ -191,7 +191,7 @@
                             <strong>Amount:</strong> @Model.SourceAmountRaw (in token's smallest unit)
                         </div>
                     }
-                    <div class="text-secondary small">
+                    <div class="small mt-2">
                         <strong>You will receive:</strong> @Model.AmountSats.ToString("N0") sats @receiveMethod
                     </div>
                 </div>
@@ -276,7 +276,7 @@
                 {
                     <div>
                         <strong>BTC Refund Locktime:</strong> @Model.HtlcExpiryBlock.Value
-                        <span class="text-secondary">(your claim must complete before this time)</span>
+                        <span class="opacity-75">(your claim must complete before this time)</span>
                     </div>
                 }
             </div>
@@ -306,7 +306,7 @@
                 }
                 @if (Model.HtlcExpiryBlock.HasValue)
                 {
-                    <div class="mt-2 text-secondary small">
+                    <div class="mt-2 small">
                         EVM HTLC refund locktime: @Model.HtlcExpiryBlock.Value — claim must complete before this.
                     </div>
                 }
