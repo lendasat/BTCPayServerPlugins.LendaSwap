@@ -141,8 +141,9 @@ public class EvmGaslessClaimService(
         }
 
         var preimageBytes = Convert.FromHexString(preimageHex);
-        var preimage32 = new byte[32];
-        Array.Copy(preimageBytes, preimage32, Math.Min(preimageBytes.Length, 32));
+        if (preimageBytes.Length != 32)
+            return (false, null, $"Preimage must be exactly 32 bytes, got {preimageBytes.Length}");
+        var preimage32 = preimageBytes;
 
         var chainId = remote.EvmChainId.Value;
         var amount = new BigInteger(remote.EvmExpectedSats.Value);
@@ -506,8 +507,10 @@ public class EvmGaslessClaimService(
         if (address.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
             address = address[2..];
         var addressBytes = Convert.FromHexString(address);
+        if (addressBytes.Length != 20)
+            throw new InvalidOperationException($"EVM address must be 20 bytes, got {addressBytes.Length}: 0x{address}");
         var padded = new byte[32];
-        Array.Copy(addressBytes, 0, padded, 32 - addressBytes.Length, addressBytes.Length);
+        Array.Copy(addressBytes, 0, padded, 12, 20);
         return padded;
     }
 

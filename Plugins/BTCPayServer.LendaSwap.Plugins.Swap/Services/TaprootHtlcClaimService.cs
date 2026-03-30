@@ -162,16 +162,27 @@ public class TaprootHtlcClaimService(
         FeeRate feeRate;
         try
         {
-            // Use a 2-block target for HTLC claims — time-sensitive due to locktime
             var feeRateResult = await explorerClient.GetFeeRateAsync(2, ct);
             feeRate = feeRateResult.FeeRate;
         }
         catch (Exception ex)
         {
-            // Fallback 10 sat/vB — conservative enough for HTLC claims where timing matters
-            logger.LogWarning(ex, "Failed to fetch fee rate, using fallback 10 sat/vB for HTLC claim");
-            feeRate = new FeeRate(Money.Satoshis(10), 1);
+            logger.LogWarning(ex, "Fee rate unavailable for HTLC claim, will retry next cycle");
+            return (false, null, "Fee rate estimation unavailable. Will retry.");
         }
+
+        // Sanity check: reject absurd fee rates
+        var satPerVb = feeRate.SatoshiPerByte;
+        if (satPerVb > 500)
+        {
+            logger.LogWarning("Fee rate {SatPerVb} sat/vB is abnormally high, capping at 500", satPerVb);
+            feeRate = new FeeRate(Money.Satoshis(500), 1);
+        }
+        else if (satPerVb < 1)
+        {
+            feeRate = new FeeRate(Money.Satoshis(1), 1);
+        }
+
         var estimatedFee = feeRate.GetFee(150);
         var outputAmount = Money.Satoshis(targetAmountSats) - estimatedFee;
 
