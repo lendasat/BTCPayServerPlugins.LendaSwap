@@ -243,6 +243,26 @@ public class SwapStatusMonitor(
             var evmClaimService = scope.ServiceProvider.GetRequiredService<EvmGaslessClaimService>();
             var (success, txHash, error) = await evmClaimService.TryGaslessFund(store, swap, ct);
 
+            if (!success && error != null && error.Contains("reverted on-chain", StringComparison.OrdinalIgnoreCase))
+            {
+                // On-chain revert means the HTLC state is broken (e.g. stale nonce or used hash).
+                // Recreate the swap on the API with a fresh preimage/hash_lock.
+                logger.LogWarning("On-chain revert for swap {SwapId}, recreating with fresh hash_lock", swap.Id);
+
+                var swapService = scope.ServiceProvider.GetRequiredService<SwapService>();
+                var recreated = await swapService.RecreateEvmSwapAsync(store, swap, ct);
+
+                await using var dbRecreate = dbContextFactory.CreateContext();
+                dbRecreate.SwapRecords.Attach(swap);
+                if (!recreated)
+                {
+                    swap.Status = SwapStatus.Failed;
+                    swap.ErrorMessage = "Swap reverted on-chain and could not be recreated.";
+                }
+                await dbRecreate.SaveChangesAsync(ct);
+                return;
+            }
+
             await using var db = dbContextFactory.CreateContext();
             db.SwapRecords.Attach(swap);
 

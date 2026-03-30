@@ -711,6 +711,103 @@ public class SwapService(
         }
     }
 
+    /// <summary>
+    /// Recreates a failed EVM→BTC swap on the API with a fresh preimage/hash_lock.
+    /// Updates the existing SwapRecord in-place so the user sees the same swap.
+    /// Returns true if recreation succeeded.
+    /// </summary>
+    public async Task<bool> RecreateEvmSwapAsync(StoreData store, SwapRecord swap, CancellationToken ct)
+    {
+        if (swap.SwapType is not (SwapType.EvmToBitcoin or SwapType.EvmToLightning))
+            return false;
+
+        var (pubKeyHex, isEphemeral) = await GetSwapPubKeyHex(store, ct);
+        if (isEphemeral) return false;
+
+        var newPreimage = cryptoHelper.GeneratePreimage();
+        var newPreimageHex = Convert.ToHexString(newPreimage).ToLowerInvariant();
+        var newPaymentHash = cryptoHelper.ComputePaymentHash(newPreimage);
+
+        var evmKey = await evmClaimService.DeriveEvmKey(store, ct);
+        if (evmKey == null) return false;
+
+        logger.LogInformation("Recreating swap {SwapId} on API with fresh hash_lock (old LendaSwapId: {OldId})",
+            swap.Id, swap.LendaSwapId);
+
+        try
+        {
+            if (swap.SwapType == SwapType.EvmToBitcoin)
+            {
+                var result = await apiClient.CreateEvmToBitcoinSwap(new EvmToBitcoinSwapRequest
+                {
+                    HashLock = "0x" + newPaymentHash,
+                    AmountOut = swap.AmountSats,
+                    EvmChainId = ParseEvmChainId(swap.SourceChain),
+                    TokenAddress = swap.SourceToken,
+                    UserAddress = evmKey.Value.evmAddress,
+                    ClaimPk = pubKeyHex,
+                    UserId = pubKeyHex,
+                    Gasless = true
+                }, ct);
+
+                swap.LendaSwapId = result.Id;
+                swap.PaymentHash = newPaymentHash;
+                swap.PreimageEncrypted = Protector.Protect(newPreimageHex);
+                swap.EvmHtlcAddress = result.EvmHtlcAddress;
+                swap.EvmCoordinatorAddress = result.EvmCoordinatorAddress;
+                swap.EvmDepositAddress = result.ClientEvmAddress;
+                swap.SourceAmountRaw = result.SourceAmount;
+                swap.TargetAmountRaw = result.TargetAmount;
+                swap.TargetHtlcAddress = result.BtcHtlcAddress;
+                swap.HtlcExpiryBlock = result.BtcRefundLocktime;
+                swap.GaslessTxHash = null;
+                swap.ErrorMessage = null;
+                swap.Status = SwapStatus.PendingPayment;
+                PopulateTokenMetadataFromResponse(swap, result);
+            }
+            else // EvmToLightning
+            {
+                var (bolt11, invoiceError) = await CreateLightningInvoice(store, swap.AmountSats, "LendaSwap: receive BTC", ct);
+                if (bolt11 == null) return false;
+
+                var result = await apiClient.CreateEvmToLightningSwap(new EvmToLightningSwapRequest
+                {
+                    LightningInvoice = bolt11,
+                    EvmChainId = ParseEvmChainId(swap.SourceChain),
+                    TokenAddress = swap.SourceToken,
+                    UserAddress = evmKey.Value.evmAddress,
+                    UserId = pubKeyHex,
+                    Gasless = true
+                }, ct);
+
+                swap.LendaSwapId = result.Id;
+                swap.PaymentHash = result.HashLock;
+                swap.PreimageEncrypted = Protector.Protect(newPreimageHex);
+                swap.EvmHtlcAddress = result.EvmHtlcAddress;
+                swap.EvmCoordinatorAddress = result.EvmCoordinatorAddress;
+                swap.EvmDepositAddress = result.ClientEvmAddress;
+                swap.SourceAmountRaw = result.SourceAmount;
+                swap.TargetAmountRaw = result.TargetAmount;
+                swap.TargetHtlcAddress = result.ClientLightningInvoice;
+                swap.ClaimDestination = "Lightning (" + bolt11[..20] + "...)";
+                swap.HtlcExpiryBlock = result.EvmRefundLocktime;
+                swap.GaslessTxHash = null;
+                swap.ErrorMessage = null;
+                swap.Status = SwapStatus.PendingPayment;
+                PopulateTokenMetadataFromResponse(swap, result);
+            }
+
+            swap.UpdatedAt = DateTimeOffset.UtcNow;
+            logger.LogInformation("Swap {SwapId} recreated with new LendaSwapId: {NewId}", swap.Id, swap.LendaSwapId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to recreate swap {SwapId} on API", swap.Id);
+            return false;
+        }
+    }
+
     private static bool IsBtcChain(string chain) =>
         string.Equals(chain, "lightning", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(chain, "bitcoin", StringComparison.OrdinalIgnoreCase) ||
