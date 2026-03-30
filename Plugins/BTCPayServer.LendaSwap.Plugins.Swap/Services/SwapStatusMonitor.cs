@@ -245,10 +245,23 @@ public class SwapStatusMonitor(
 
             if (!success && error != null && error.Contains("reverted on-chain", StringComparison.OrdinalIgnoreCase))
             {
-                // On-chain revert means the HTLC state is broken (e.g. stale nonce or used hash).
-                // Recreate the swap on the API with a fresh preimage/hash_lock.
-                logger.LogWarning("On-chain revert for swap {SwapId}, recreating with fresh hash_lock", swap.Id);
+                // Track revert count to avoid infinite recreate loops
+                _errorCounts.AddOrUpdate(swap.Id + ":reverts", 1, (_, c) => c + 1);
+                _errorCounts.TryGetValue(swap.Id + ":reverts", out var revertCount);
 
+                logger.LogWarning("On-chain revert #{Count} for swap {SwapId}: {Error}", revertCount, swap.Id, error);
+
+                if (revertCount >= 3)
+                {
+                    await using var dbFail = dbContextFactory.CreateContext();
+                    dbFail.SwapRecords.Attach(swap);
+                    swap.Status = SwapStatus.Failed;
+                    swap.ErrorMessage = "Swap reverted on-chain repeatedly. Please check your EVM wallet balance and try a new swap.";
+                    await dbFail.SaveChangesAsync(ct);
+                    return;
+                }
+
+                // Recreate the swap on the API with a fresh preimage/hash_lock.
                 var swapService = scope.ServiceProvider.GetRequiredService<SwapService>();
                 var recreated = await swapService.RecreateEvmSwapAsync(store, swap, ct);
 
