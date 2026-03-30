@@ -42,6 +42,24 @@
             ? Model.PaymentAddress.ToUpper()
             : $"bitcoin:{Model.PaymentAddress}?amount={((decimal)Model.AmountSats / 100_000_000m).ToString("0.########")}")
         : null;
+
+    // Format raw token amounts to human-readable using decimals
+    string FormatTokenAmount(string rawAmount, int? decimals, string symbol)
+    {
+        if (string.IsNullOrEmpty(rawAmount)) return null;
+        if (!decimal.TryParse(rawAmount, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var raw))
+            return $"{rawAmount} {symbol ?? "tokens"}";
+        if (decimals is null or 0)
+            return $"{raw:N0} {symbol ?? "tokens"}";
+        var value = raw / (decimal)Math.Pow(10, decimals.Value);
+        var formatted = value.ToString($"N{Math.Min(decimals.Value, 8)}",
+            System.Globalization.CultureInfo.InvariantCulture);
+        return $"{formatted} {symbol ?? "tokens"}";
+    }
+
+    var sourceDisplay = FormatTokenAmount(Model.SourceAmountRaw, Model.SourceTokenDecimals, Model.SourceTokenSymbol);
+    var targetDisplay = FormatTokenAmount(Model.TargetAmountRaw, Model.TargetTokenDecimals, Model.TargetTokenSymbol);
 }
 
 <div class="sticky-header d-flex align-items-center justify-content-between">
@@ -142,7 +160,7 @@
                 <div class="alert alert-warning">
                     <h5 class="alert-heading mb-2">Waiting for Payment</h5>
                     <p class="mb-2">
-                        Send <strong>@(Model.SourceAmountRaw ?? "the required") tokens</strong> to the
+                        Send <strong>@(sourceDisplay ?? "the required amount")</strong> to the
                         deposit address below. Once the tokens arrive, the swap will be completed automatically.
                     </p>
                     <div class="text-center my-3">
@@ -160,7 +178,7 @@
                     @if (!string.IsNullOrEmpty(Model.SourceAmountRaw))
                     {
                         <div class="mb-2">
-                            <strong>Amount:</strong> @Model.SourceAmountRaw (in token's smallest unit)
+                            <strong>Amount:</strong> @(sourceDisplay ?? Model.SourceAmountRaw)
                         </div>
                     }
                     <div class="small mt-2">
@@ -189,7 +207,7 @@
                     @if (!string.IsNullOrEmpty(Model.SourceAmountRaw))
                     {
                         <div class="mb-2">
-                            <strong>Amount:</strong> @Model.SourceAmountRaw (in token's smallest unit)
+                            <strong>Amount:</strong> @(sourceDisplay ?? Model.SourceAmountRaw)
                         </div>
                     }
                     <div class="small mt-2">
@@ -360,8 +378,25 @@
                     </div>
                 </dd>
 
-                <dt class="col-sm-4">Amount</dt>
-                <dd class="col-sm-8">@Model.AmountSats.ToString("N0") sats</dd>
+                @if (isEvmToBtc && sourceDisplay != null)
+                {
+                    <dt class="col-sm-4">You send</dt>
+                    <dd class="col-sm-8">@sourceDisplay</dd>
+                    <dt class="col-sm-4">You receive</dt>
+                    <dd class="col-sm-8">@Model.AmountSats.ToString("N0") sats</dd>
+                }
+                else if (isBtcToEvm && targetDisplay != null)
+                {
+                    <dt class="col-sm-4">You send</dt>
+                    <dd class="col-sm-8">@Model.AmountSats.ToString("N0") sats</dd>
+                    <dt class="col-sm-4">You receive</dt>
+                    <dd class="col-sm-8">@targetDisplay</dd>
+                }
+                else
+                {
+                    <dt class="col-sm-4">Amount</dt>
+                    <dd class="col-sm-8">@Model.AmountSats.ToString("N0") sats</dd>
+                }
 
                 <dt class="col-sm-4">Destination</dt>
                 <dd class="col-sm-8">

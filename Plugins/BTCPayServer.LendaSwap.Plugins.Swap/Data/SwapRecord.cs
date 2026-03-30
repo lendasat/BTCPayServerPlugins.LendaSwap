@@ -87,6 +87,24 @@ public class SwapRecord
     [MaxLength(128)]
     public string SourceAmountRaw { get; set; }
 
+    /// <summary>Token symbol for the source side (e.g. "USDC", "BTC").</summary>
+    [MaxLength(32)]
+    public string SourceTokenSymbol { get; set; }
+
+    /// <summary>Decimal places for the source token (e.g. 6 for USDC, 8 for BTC).</summary>
+    public int? SourceTokenDecimals { get; set; }
+
+    /// <summary>Token symbol for the target side (e.g. "BTC", "USDC").</summary>
+    [MaxLength(32)]
+    public string TargetTokenSymbol { get; set; }
+
+    /// <summary>Decimal places for the target token.</summary>
+    public int? TargetTokenDecimals { get; set; }
+
+    /// <summary>Target amount in token's smallest units (for BTC→EVM: how much EVM tokens received).</summary>
+    [MaxLength(128)]
+    public string TargetAmountRaw { get; set; }
+
     [MaxLength(1000)]
     public string ErrorMessage { get; set; }
 
