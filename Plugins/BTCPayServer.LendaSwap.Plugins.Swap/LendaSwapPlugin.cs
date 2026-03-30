@@ -39,7 +39,7 @@ public class LendaSwapPlugin : BaseBTCPayServerPlugin
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
-        services.AddScheduledTask<SwapStatusMonitor>(TimeSpan.FromSeconds(2));
+        services.AddScheduledTask<SwapStatusMonitor>(TimeSpan.FromSeconds(15));
 
         base.Execute(services);
     }

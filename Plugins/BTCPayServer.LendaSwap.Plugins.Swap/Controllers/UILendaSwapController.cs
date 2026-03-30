@@ -55,6 +55,22 @@ public class UILendaSwapController(
         if (!ModelState.IsValid)
             return View(model);
 
+        // Validate API URL: require HTTPS unless it's a local dev URL
+        if (!string.IsNullOrWhiteSpace(model.ApiBaseUrl))
+        {
+            if (!Uri.TryCreate(model.ApiBaseUrl, UriKind.Absolute, out var apiUri))
+            {
+                ModelState.AddModelError(nameof(model.ApiBaseUrl), "Invalid URL format.");
+                return View(model);
+            }
+            var isLocal = apiUri.Host is "localhost" or "127.0.0.1" || apiUri.Host.EndsWith(".local");
+            if (!isLocal && apiUri.Scheme != "https")
+            {
+                ModelState.AddModelError(nameof(model.ApiBaseUrl), "API URL must use HTTPS for non-local endpoints.");
+                return View(model);
+            }
+        }
+
         var settings = new LendaSwapSettings
         {
             DefaultPolygonAddress = model.DefaultPolygonAddress,
@@ -289,6 +305,20 @@ public class UILendaSwapController(
         if (string.IsNullOrEmpty(sourceChain) || string.IsNullOrEmpty(sourceToken) ||
             string.IsNullOrEmpty(targetChain) || string.IsNullOrEmpty(targetToken) || amount <= 0)
             return BadRequest(new { error = "Invalid parameters" });
+
+        // Whitelist valid chain identifiers to prevent injection
+        string[] validChains = ["137", "1", "42161", "Lightning", "Bitcoin", "Arkade", "Polygon", "Ethereum", "Arbitrum"];
+        if (!validChains.Contains(sourceChain, StringComparer.OrdinalIgnoreCase) ||
+            !validChains.Contains(targetChain, StringComparer.OrdinalIgnoreCase))
+            return BadRequest(new { error = "Invalid chain" });
+
+        // Basic token format validation (hex address or known token ID)
+        if (sourceToken.StartsWith("0x") && sourceToken.Length != 42)
+            return BadRequest(new { error = "Invalid token address format" });
+
+        // Cap amount to prevent abuse
+        if (amount > 100_000_000) // 1 BTC in sats
+            return BadRequest(new { error = "Amount exceeds maximum" });
 
         try
         {

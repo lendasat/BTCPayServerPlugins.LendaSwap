@@ -30,6 +30,11 @@ public class SwapStatusMonitor(
     /// </summary>
     private static readonly TimeSpan SwapStaleTimeout = TimeSpan.FromHours(24);
 
+    /// <summary>
+    /// Tracks consecutive API errors per swap to implement backoff.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _errorCounts = new();
+
     public async Task Do(CancellationToken cancellationToken)
     {
         try
@@ -56,10 +61,21 @@ public class SwapStatusMonitor(
                         continue;
                     }
 
+                    // Exponential backoff: skip swaps that keep failing
+                    _errorCounts.TryGetValue(swap.Id, out var errors);
+                    if (errors > 0)
+                    {
+                        var skipCycles = Math.Min(errors * errors, 20); // 1, 4, 9, 16, 20 max
+                        if (Random.Shared.Next(skipCycles) != 0)
+                            continue;
+                    }
+
                     await PollAndUpdateSwap(db, swap, cancellationToken);
+                    _errorCounts.TryRemove(swap.Id, out _); // Reset on success
                 }
                 catch (Exception ex)
                 {
+                    _errorCounts.AddOrUpdate(swap.Id, 1, (_, count) => count + 1);
                     logger.LogWarning(ex, "Failed to poll swap {SwapId}", swap.Id);
                 }
             }

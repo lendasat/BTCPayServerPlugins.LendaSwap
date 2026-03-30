@@ -353,7 +353,7 @@ public class EvmGaslessClaimService(
         var sigBytes = new byte[65];
         rScalar.WriteToSpan(sigBytes.AsSpan(0, 32));
         sScalar.WriteToSpan(sigBytes.AsSpan(32, 32));
-        sigBytes[64] = (byte)(27 + recId);
+        sigBytes[64] = (byte)ValidateRecoveryId(recId);
 
         return "0x" + Convert.ToHexString(sigBytes).ToLowerInvariant();
     }
@@ -403,7 +403,7 @@ public class EvmGaslessClaimService(
         rScalar.WriteToSpan(rBytes);
         sScalar.WriteToSpan(sBytes);
 
-        return (27 + recId, rBytes, sBytes);
+        return (ValidateRecoveryId(recId), rBytes, sBytes);
     }
 
     /// <summary>
@@ -480,7 +480,7 @@ public class EvmGaslessClaimService(
         rScalar.WriteToSpan(rBytes);
         sScalar.WriteToSpan(sBytes);
 
-        var v = 27 + recId;
+        var v = ValidateRecoveryId(recId);
         return (v, rBytes, sBytes);
     }
 
@@ -492,6 +492,13 @@ public class EvmGaslessClaimService(
         var padded = new byte[32];
         Array.Copy(bytes, 0, padded, 32 - bytes.Length, bytes.Length);
         return padded;
+    }
+
+    private static int ValidateRecoveryId(int recId)
+    {
+        if (recId is < 0 or > 1)
+            throw new InvalidOperationException($"Invalid ECDSA recovery ID: {recId}. Expected 0 or 1.");
+        return 27 + recId;
     }
 
     private static byte[] AbiEncodeAddress(string address)
