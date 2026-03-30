@@ -11,6 +11,28 @@
     Layout = "_Layout";
     ViewData.SetLayoutModel(new LayoutModel(nameof(LendaSwapNavPages.Swaps), "LendaSwap")
         { ActiveCategory = nameof(LendaSwapNavPages) });
+
+    string ChainName(string chain) => chain?.ToLowerInvariant() switch
+    {
+        "137" or "polygon" => "Polygon",
+        "1" or "ethereum" => "Ethereum",
+        "42161" or "arbitrum" => "Arbitrum",
+        "lightning" => "Lightning",
+        "bitcoin" => "Bitcoin",
+        "arkade" => "Arkade",
+        _ => chain
+    };
+
+    string SwapSideLabel(string symbol, string chain, bool isBtcSide)
+    {
+        if (!string.IsNullOrEmpty(symbol))
+        {
+            var name = ChainName(chain);
+            return !string.IsNullOrEmpty(name) ? $"{symbol} ({name})" : symbol;
+        }
+        if (isBtcSide) return $"BTC ({ChainName(chain) ?? "?"})";
+        return ChainName(chain) ?? "?";
+    }
 }
 
 <div class="sticky-header d-flex align-items-center justify-content-between">
@@ -58,27 +80,14 @@
                         <td>@swap.CreatedAt.ToString("yyyy-MM-dd HH:mm")</td>
                         <td>
                             @{
-                                var sourceLabel = swap.SwapType switch
-                                {
-                                    SwapType.LightningToEvm or SwapType.LightningToArkade => "BTC (LN)",
-                                    SwapType.BitcoinToArkade => "BTC",
-                                    SwapType.EvmToLightning or SwapType.EvmToBitcoin => swap.SourceToken ?? "EVM",
-                                    _ => swap.SourceToken ?? "?"
-                                };
-                                var targetLabel = swap.SwapType switch
-                                {
-                                    SwapType.LightningToUsdc => "EVM (legacy)",
-                                    SwapType.LightningToEvm => "EVM",
-                                    SwapType.BitcoinToArkade or SwapType.LightningToArkade => "Arkade",
-                                    SwapType.EvmToLightning => "BTC (LN)",
-                                    SwapType.EvmToBitcoin => "BTC",
-                                    _ => swap.TargetToken ?? "?"
-                                };
-                                var typeBadge = swap.SwapType is SwapType.EvmToLightning or SwapType.EvmToBitcoin
-                                    ? "bg-success"
-                                    : swap.SwapType is SwapType.LightningToEvm
-                                        ? "bg-primary"
-                                        : "bg-info";
+                                var isSrcBtc = swap.SwapType is SwapType.LightningToEvm or SwapType.LightningToArkade
+                                    or SwapType.BitcoinToArkade or SwapType.BitcoinToEvm;
+                                var isTgtBtc = swap.SwapType is SwapType.EvmToLightning or SwapType.EvmToBitcoin;
+                                var sourceLabel = SwapSideLabel(swap.SourceTokenSymbol, swap.SourceChain, isSrcBtc);
+                                var targetLabel = SwapSideLabel(swap.TargetTokenSymbol, swap.TargetChain, isTgtBtc);
+                                var typeBadge = isTgtBtc ? "bg-success"
+                                    : swap.SwapType is SwapType.LightningToEvm or SwapType.BitcoinToEvm ? "bg-primary"
+                                    : "bg-info";
                             }
                             <span class="badge @typeBadge">@sourceLabel -> @targetLabel</span>
                         </td>

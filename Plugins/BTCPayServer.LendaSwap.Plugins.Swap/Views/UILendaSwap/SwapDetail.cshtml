@@ -64,6 +64,19 @@
 
     var sourceDisplay = FormatTokenAmount(Model.SourceAmountRaw, Model.SourceTokenDecimals, Model.SourceTokenSymbol);
     var targetDisplay = FormatTokenAmount(Model.TargetAmountRaw, Model.TargetTokenDecimals, Model.TargetTokenSymbol);
+
+    string ChainName(string chain) => chain?.ToLowerInvariant() switch
+    {
+        "137" or "polygon" => "Polygon", "1" or "ethereum" => "Ethereum",
+        "42161" or "arbitrum" => "Arbitrum", "lightning" => "Lightning",
+        "bitcoin" => "Bitcoin", "arkade" => "Arkade", _ => chain
+    };
+    var srcLabel = !string.IsNullOrEmpty(Model.SourceTokenSymbol)
+        ? $"{Model.SourceTokenSymbol} ({ChainName(Model.SourceChain)})"
+        : $"{ChainName(Model.SourceChain)}";
+    var tgtLabel = !string.IsNullOrEmpty(Model.TargetTokenSymbol)
+        ? $"{Model.TargetTokenSymbol} ({ChainName(Model.TargetChain)})"
+        : $"{ChainName(Model.TargetChain)}";
 }
 
 <div class="sticky-header d-flex align-items-center justify-content-between">
@@ -80,19 +93,7 @@
 
         <div class="d-flex align-items-center gap-3 mb-4">
             <span id="swap-status-badge" class="badge @badgeClass fs-6" @(Model.Status == SwapStatus.PendingPayment ? "style=\"color: #000 !important;\"" : "")>@Model.Status</span>
-            <span class="badge bg-info fs-6">
-                @(Model.SwapType switch
-                {
-                    SwapType.LightningToEvm => $"Lightning -> EVM ({Model.TargetChain})",
-                    SwapType.LightningToUsdc => "Lightning -> EVM (legacy)",
-                    SwapType.BitcoinToArkade => "Bitcoin -> Arkade",
-                    SwapType.BitcoinToEvm => $"Bitcoin -> EVM ({Model.TargetChain})",
-                    SwapType.LightningToArkade => "Lightning -> Arkade",
-                    SwapType.EvmToLightning => $"EVM ({Model.SourceChain}) -> Lightning",
-                    SwapType.EvmToBitcoin => $"EVM ({Model.SourceChain}) -> Bitcoin",
-                    _ => Model.SwapType.ToString()
-                })
-            </span>
+            <span class="badge bg-info fs-6">@srcLabel -> @tgtLabel</span>
         </div>
 
         <div id="swap-alert-zone">
