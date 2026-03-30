@@ -79,18 +79,18 @@
         {
             var stepMessage = Model.Status switch
             {
-                SwapStatus.PayingFromWallet => "Broadcasting onchain payment...",
+                SwapStatus.PayingFromWallet => "Sending BTC payment...",
                 SwapStatus.Processing => isBtcToEvm
-                    ? "BTC payment detected. Server is funding the EVM HTLC..."
+                    ? "BTC payment received. Converting to tokens..."
                     : isEvmToBtc
-                        ? "EVM funding detected. Server is processing..."
+                        ? "Tokens received. Converting to BTC..."
                         : "Processing swap...",
                 SwapStatus.PendingClaim => isBtcToEvm
-                    ? "EVM HTLC funded. Claiming tokens gaslessly..."
+                    ? "Tokens ready. Claiming automatically..."
                     : isEvmToBtc
-                        ? "BTC HTLC funded. Auto-claiming BTC..."
+                        ? "BTC ready. Claiming automatically..."
                         : "Waiting for claim...",
-                SwapStatus.Claiming => "Claim transaction submitted. Waiting for confirmation...",
+                SwapStatus.Claiming => "Claim submitted. Waiting for confirmation...",
                 _ => "Processing..."
             };
             <div class="alert alert-primary d-flex align-items-center gap-3 mb-4">
@@ -175,10 +175,10 @@
                     <p class="mb-2">
                         Fund this swap using the
                         <a href="https://lendaswap.com" target="_blank" rel="noopener">LendaSwap app</a>
-                        or a compatible EVM wallet via the HTLCCoordinator contract.
+                        or a compatible wallet.
                     </p>
                     <div class="mb-2">
-                        <strong>HTLC Contract:</strong><br/>
+                        <strong>Contract Address:</strong><br/>
                         <div class="d-flex align-items-center gap-2 mt-1">
                             <code class="text-break user-select-all">@(Model.EvmCoordinatorAddress ?? Model.EvmHtlcAddress)</code>
                             <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@(Model.EvmCoordinatorAddress ?? Model.EvmHtlcAddress)" title="Copy">
@@ -207,12 +207,11 @@
                 <p class="mb-0">
                     @if (Model.SwapType == SwapType.EvmToLightning)
                     {
-                        <span>Your EVM funding was detected. The server is now paying the Lightning invoice to your store.
-                        BTC will arrive in your Lightning wallet automatically.</span>
+                        <span>Your token payment was detected. BTC will arrive in your Lightning wallet automatically.</span>
                     }
                     else
                     {
-                        <span>Your EVM funding was detected. The server is sending BTC to a Taproot HTLC for you to claim.</span>
+                        <span>Your token payment was detected. BTC is being sent to your store.</span>
                     }
                 </p>
             </div>
@@ -246,16 +245,15 @@
         @if (isArkadeSwap && needsClaim && !string.IsNullOrEmpty(preimage))
         {
             <div class="alert alert-warning">
-                <h5 class="alert-heading mb-2">Action Required: Claim your Arkade VHTLC</h5>
+                <h5 class="alert-heading mb-2">Action Required: Claim your Arkade funds</h5>
                 <p class="mb-2">
-                    The server has funded the Arkade VHTLC. You must claim it using your Arkade wallet
-                    by revealing the preimage (secret) below. <strong>If you do not claim before the timelock expires,
-                    the server will reclaim the funds.</strong>
+                    Your BTC is ready to claim. Use your Arkade wallet to claim it with the secret below.
+                    <strong>Claim before the timelock expires or the funds will be returned.</strong>
                 </p>
                 @if (!string.IsNullOrEmpty(Model.TargetHtlcAddress))
                 {
                     <div class="mb-2">
-                        <strong>Arkade VHTLC Address:</strong><br />
+                        <strong>Arkade Claim Address:</strong><br />
                         <div class="d-flex align-items-center gap-2 mt-1">
                             <code class="text-break user-select-all">@Model.TargetHtlcAddress</code>
                             <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.TargetHtlcAddress" title="Copy">
@@ -287,11 +285,10 @@
         @if (isBtcToEvm && needsClaim)
         {
             <div class="alert alert-info">
-                <h5 class="alert-heading mb-2">Pending EVM Claim</h5>
+                <h5 class="alert-heading mb-2">Pending Token Claim</h5>
                 <p class="mb-2">
-                    The server has funded the EVM HTLC. The claim requires an EIP-712 signature
-                    from your EVM wallet. Please use the LendaSwap app or your EVM wallet to
-                    complete the claim using the preimage below.
+                    Your tokens are ready to claim. This is being handled automatically.
+                    If auto-claim fails, use the LendaSwap app with the secret below.
                 </p>
                 @if (!string.IsNullOrEmpty(preimage))
                 {
@@ -308,7 +305,7 @@
                 @if (Model.HtlcExpiryBlock.HasValue)
                 {
                     <div class="mt-2 small">
-                        EVM HTLC refund locktime: @Model.HtlcExpiryBlock.Value — claim must complete before this.
+                        Refund locktime: @Model.HtlcExpiryBlock.Value — claim must complete before this.
                     </div>
                 }
             </div>
@@ -323,16 +320,15 @@
                 @if (Model.HtlcExpiryBlock.HasValue)
                 {
                     <p class="mb-0 mt-2">
-                        If you already funded this swap, the HTLC will automatically refund after the timelock
-                        expires (locktime: @Model.HtlcExpiryBlock.Value). No action is needed — the LendaSwap
-                        server handles refunds automatically.
+                        If you already funded this swap, your funds will be automatically refunded after the
+                        locktime expires (@Model.HtlcExpiryBlock.Value). No action needed.
                     </p>
                 }
                 else
                 {
                     <p class="mb-0 mt-2">
                         If the swap failed before you sent any funds, no action is needed.
-                        If you did send funds, they will be automatically refunded after the HTLC timelock expires.
+                        If you did send funds, they will be automatically refunded after the locktime expires.
                     </p>
                 }
             </div>
@@ -357,28 +353,11 @@
                 <dt class="col-sm-4">Swap ID</dt>
                 <dd class="col-sm-8">
                     <div class="d-flex align-items-center gap-2">
-                        <code>@Model.Id</code>
-                        <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.Id" title="Copy">
+                        <code>@(Model.LendaSwapId ?? Model.Id)</code>
+                        <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@(Model.LendaSwapId ?? Model.Id)" title="Copy">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                         </button>
                     </div>
-                </dd>
-
-                <dt class="col-sm-4">LendaSwap ID</dt>
-                <dd class="col-sm-8">
-                    @if (!string.IsNullOrEmpty(Model.LendaSwapId))
-                    {
-                        <div class="d-flex align-items-center gap-2">
-                            <code>@Model.LendaSwapId</code>
-                            <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@Model.LendaSwapId" title="Copy">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                            </button>
-                        </div>
-                    }
-                    else
-                    {
-                        <code>—</code>
-                    }
                 </dd>
 
                 <dt class="col-sm-4">Amount</dt>
@@ -463,13 +442,13 @@
             </div>
         }
 
-        <!-- Gasless Claim Status -->
+        <!-- Claim Status -->
         @if (!string.IsNullOrEmpty(Model.GaslessTxHash))
         {
             <div class="bg-tile rounded p-3 mb-4">
                 <h4 class="mb-3">Claim Status</h4>
                 <dl class="row mb-0">
-                    <dt class="col-sm-4">Claim Tx Hash</dt>
+                    <dt class="col-sm-4">Claim Transaction</dt>
                     <dd class="col-sm-8">
                         <div class="d-flex align-items-center gap-2">
                             <code>@Model.GaslessTxHash</code>
@@ -526,7 +505,7 @@
 
                 @if (!string.IsNullOrEmpty(Model.TargetHtlcAddress))
                 {
-                    <dt class="col-sm-4">Target HTLC Address</dt>
+                    <dt class="col-sm-4">Target Address</dt>
                     <dd class="col-sm-8">
                         <div class="d-flex align-items-center gap-2">
                             <code class="text-break">@Model.TargetHtlcAddress</code>
@@ -539,7 +518,7 @@
 
                 @if (Model.HtlcExpiryBlock.HasValue)
                 {
-                    <dt class="col-sm-4">HTLC Refund Locktime</dt>
+                    <dt class="col-sm-4">Refund Locktime</dt>
                     <dd class="col-sm-8">@Model.HtlcExpiryBlock.Value</dd>
                 }
             </dl>
@@ -615,10 +594,10 @@
         };
 
         var stepMessages = {
-            'PayingFromWallet': 'Broadcasting onchain payment...',
-            'Processing': '@(isEvmToBtc ? "EVM funding detected. Server is processing..." : isBtcToEvm ? "BTC payment detected. Server is funding the EVM HTLC..." : "Processing swap...")',
-            'PendingClaim': '@(isBtcToEvm ? "EVM HTLC funded. Claiming tokens gaslessly..." : isEvmToBtc ? "BTC HTLC funded. Auto-claiming BTC..." : "Waiting for claim...")',
-            'Claiming': 'Claim transaction submitted. Waiting for confirmation...'
+            'PayingFromWallet': 'Sending BTC payment...',
+            'Processing': '@(isEvmToBtc ? "Tokens received. Converting to BTC..." : isBtcToEvm ? "BTC payment received. Converting to tokens..." : "Processing swap...")',
+            'PendingClaim': '@(isBtcToEvm ? "Tokens ready. Claiming automatically..." : isEvmToBtc ? "BTC ready. Claiming automatically..." : "Waiting for claim...")',
+            'Claiming': 'Claim submitted. Waiting for confirmation...'
         };
 
         function escapeHtml(str) {
