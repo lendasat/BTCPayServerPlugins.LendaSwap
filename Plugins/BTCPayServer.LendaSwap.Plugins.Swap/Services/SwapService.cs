@@ -172,7 +172,35 @@ public class SwapService(
             swap.ErrorMessage = ex.Message;
         }
 
-        // BTC fallback: if API response didn't provide token metadata, fill in BTC defaults
+        // Fill in token metadata if swap creation response didn't provide it
+        if (string.IsNullOrEmpty(swap.SourceTokenSymbol) || string.IsNullOrEmpty(swap.TargetTokenSymbol))
+        {
+            try
+            {
+                var tokenList = await apiClient.GetTokens(ct);
+                var all = new List<TokenInfo>(tokenList.BtcTokens);
+                all.AddRange(tokenList.EvmTokens);
+
+                if (string.IsNullOrEmpty(swap.SourceTokenSymbol))
+                {
+                    var src = all.FirstOrDefault(t =>
+                        string.Equals(t.TokenId, model.SourceToken, StringComparison.OrdinalIgnoreCase));
+                    if (src != null) { swap.SourceTokenSymbol = src.Symbol; swap.SourceTokenDecimals = src.Decimals; }
+                }
+                if (string.IsNullOrEmpty(swap.TargetTokenSymbol))
+                {
+                    var tgt = all.FirstOrDefault(t =>
+                        string.Equals(t.TokenId, model.TargetToken, StringComparison.OrdinalIgnoreCase));
+                    if (tgt != null) { swap.TargetTokenSymbol = tgt.Symbol; swap.TargetTokenDecimals = tgt.Decimals; }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to resolve token metadata from /tokens API");
+            }
+        }
+
+        // BTC fallback for chains where symbol is always "BTC"
         swap.SourceTokenSymbol ??= IsBtcChain(model.SourceChain) ? "BTC" : null;
         swap.TargetTokenSymbol ??= IsBtcChain(model.TargetChain) ? "BTC" : null;
         swap.SourceTokenDecimals ??= IsBtcChain(model.SourceChain) ? 8 : null;
