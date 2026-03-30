@@ -123,8 +123,7 @@ public class SwapService(
         logger.LogInformation("Creating {SwapType} swap for store {StoreId}, amount {Amount} sats",
             swapType, storeId, model.AmountSats);
 
-        // For EVM→BTC receive swaps, ClaimDestination is "this store" (gasless mode derives deposit address)
-        var claimDest = isEvmToBtcSwap ? "Store Lightning/Onchain wallet" : model.ClaimDestination;
+        var claimDest = isEvmToBtcSwap ? null : model.ClaimDestination;
 
         var swap = new SwapRecord
         {
@@ -331,6 +330,7 @@ public class SwapService(
         swap.EvmGasless = true;
         swap.SourceAmountRaw = result.SourceAmount;
         swap.TargetHtlcAddress = result.ClientLightningInvoice;
+        swap.ClaimDestination = "Lightning (" + invoice.bolt11[..20] + "...)";
         swap.HtlcExpiryBlock = result.EvmRefundLocktime;
         swap.AmountSats = long.TryParse(result.TargetAmount, out var tgtAmt) ? tgtAmt : model.AmountSats;
         swap.Status = SwapStatus.PendingPayment;
@@ -374,6 +374,7 @@ public class SwapService(
         swap.EvmGasless = true;
         swap.SourceAmountRaw = result.SourceAmount;
         swap.TargetHtlcAddress = result.BtcHtlcAddress;
+        swap.ClaimDestination = result.BtcHtlcAddress;
         swap.HtlcExpiryBlock = result.BtcRefundLocktime;
         swap.AmountSats = long.TryParse(result.TargetAmount, out var tgtAmt) ? tgtAmt : model.AmountSats;
         swap.Status = SwapStatus.PendingPayment;
