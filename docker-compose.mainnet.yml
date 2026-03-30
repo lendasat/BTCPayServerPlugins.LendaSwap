@@ -34,7 +34,7 @@ services:
       - "43782:43782"
       - "8333:8333"
     volumes:
-      - mainnet_bitcoin:/data
+      - mainnet_mainnet_bitcoin:/data
 
   nbxplorer:
     image: nicolasdorier/nbxplorer:2.5.29
@@ -61,4 +61,5 @@ services:
 
 volumes:
   mainnet_pgdata:
-  mainnet_bitcoin:
+  mainnet_mainnet_bitcoin:
+    external: true

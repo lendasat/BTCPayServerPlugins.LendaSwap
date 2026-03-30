@@ -57,7 +57,7 @@
     <div class="col-xl-10 col-xxl-constrain">
 
         <div class="d-flex align-items-center gap-3 mb-4">
-            <span class="badge @badgeClass fs-6" @(Model.Status == SwapStatus.PendingPayment ? "style=\"color: #000 !important;\"" : "")>@Model.Status</span>
+            <span id="swap-status-badge" class="badge @badgeClass fs-6" @(Model.Status == SwapStatus.PendingPayment ? "style=\"color: #000 !important;\"" : "")>@Model.Status</span>
             <span class="badge bg-info fs-6">
                 @(Model.SwapType switch
                 {
@@ -73,6 +73,7 @@
             </span>
         </div>
 
+        <div id="swap-alert-zone">
         <!-- Processing spinner for active swaps -->
         @if (isProcessing && !isTerminal)
         {
@@ -347,6 +348,8 @@
             </div>
         }
 
+        </div><!-- /swap-alert-zone -->
+
         <!-- Swap Information -->
         <div class="bg-tile rounded p-3 mb-4">
             <h4 class="mb-3">Swap Information</h4>
@@ -591,32 +594,125 @@
         });
     });
 
-    // AJAX status polling — no full page reload
+    // AJAX status polling with partial DOM updates (no page reload flicker)
     @if (!isTerminal)
     {
         <text>
         var lastStatus = '@Model.Status.ToString()';
-        var pollInterval = 2000;
+        var lastTxId = '@(Model.TxId ?? "")';
+        var pollInterval = 3000;
         var statusUrl = '@Url.Action("SwapStatusJson", "UILendaSwap", new { storeId, swapId = Model.Id })';
+
+        var statusBadges = {
+            'PendingPayment': { cls: 'bg-warning', style: 'color: #000 !important;' },
+            'Processing': { cls: 'bg-info', style: '' },
+            'PendingClaim': { cls: 'bg-primary', style: '' },
+            'Claiming': { cls: 'bg-primary', style: '' },
+            'PayingFromWallet': { cls: 'bg-info', style: '' },
+            'Completed': { cls: 'bg-success', style: '' },
+            'Failed': { cls: 'bg-danger', style: '' },
+            'Expired': { cls: 'bg-secondary', style: '' }
+        };
+
+        var stepMessages = {
+            'PayingFromWallet': 'Broadcasting onchain payment...',
+            'Processing': '@(isEvmToBtc ? "EVM funding detected. Server is processing..." : isBtcToEvm ? "BTC payment detected. Server is funding the EVM HTLC..." : "Processing swap...")',
+            'PendingClaim': '@(isBtcToEvm ? "EVM HTLC funded. Claiming tokens gaslessly..." : isEvmToBtc ? "BTC HTLC funded. Auto-claiming BTC..." : "Waiting for claim...")',
+            'Claiming': 'Claim transaction submitted. Waiting for confirmation...'
+        };
+
+        function updateDom(data) {
+            // Update status badge
+            var badge = document.getElementById('swap-status-badge');
+            if (badge) {
+                var badgeInfo = statusBadges[data.status] || { cls: 'bg-light', style: '' };
+                badge.className = 'badge ' + badgeInfo.cls + ' fs-6';
+                badge.style.cssText = badgeInfo.style;
+                badge.textContent = data.status;
+            }
+
+            // Update timestamp
+            var updatedEl = document.getElementById('swap-updated-at');
+            if (updatedEl && data.updatedAt) updatedEl.textContent = data.updatedAt;
+
+            // Update completed timestamp
+            if (data.completedAt) {
+                var completedRow = document.getElementById('swap-completed-row');
+                if (!completedRow) {
+                    var dl = document.querySelector('.bg-tile dl');
+                    if (dl) {
+                        var dt = document.createElement('dt');
+                        dt.className = 'col-sm-4';
+                        dt.textContent = 'Completed';
+                        var dd = document.createElement('dd');
+                        dd.className = 'col-sm-8';
+                        dd.id = 'swap-completed-row';
+                        dd.textContent = data.completedAt;
+                        dl.appendChild(dt);
+                        dl.appendChild(dd);
+                    }
+                } else {
+                    completedRow.textContent = data.completedAt;
+                }
+            }
+
+            // Update TxId if new
+            if (data.txId && data.txId !== lastTxId) {
+                lastTxId = data.txId;
+                var txRow = document.getElementById('swap-txid-row');
+                if (!txRow) {
+                    // Will show on next major state change via reload
+                }
+            }
+
+            // Update/show/hide alert sections
+            var alertZone = document.getElementById('swap-alert-zone');
+            if (alertZone) {
+                if (data.isTerminal && data.status === 'Completed') {
+                    alertZone.innerHTML = '<div class="alert alert-success d-flex align-items-center gap-3 mb-4">' +
+                        '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>' +
+                        '<div><h5 class="mb-1">Swap completed!</h5><p class="mb-0">BTC has been received by your store.</p></div></div>';
+                } else if (data.isTerminal && data.status === 'Failed') {
+                    alertZone.innerHTML = '<div class="alert alert-danger"><h5 class="alert-heading mb-2">Swap Failed</h5>' +
+                        '<p class="mb-1"><strong>Error:</strong> ' + (data.errorMessage || 'Unknown error') + '</p></div>';
+                } else if (data.isTerminal && data.status === 'Expired') {
+                    alertZone.innerHTML = '<div class="alert alert-secondary"><h5 class="alert-heading mb-2">Swap Expired</h5>' +
+                        '<p class="mb-0">This swap expired before it was funded. No funds were locked.</p></div>';
+                } else if (!data.isTerminal && data.status !== 'PendingPayment') {
+                    var msg = stepMessages[data.status] || 'Processing...';
+                    alertZone.innerHTML = '<div class="alert alert-primary d-flex align-items-center gap-3 mb-4">' +
+                        '<div class="spinner-border text-primary" role="status" style="width: 2rem; height: 2rem;"><span class="visually-hidden">Processing...</span></div>' +
+                        '<div><h5 class="mb-1">Swap in progress</h5><p class="mb-0">' + msg + '</p>' +
+                        '<small class="opacity-75">Status updates automatically.</small></div></div>';
+                }
+            }
+        }
 
         function pollStatus() {
             fetch(statusUrl)
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (data) {
-                    if (!data) return;
-                    if (data.isTerminal || data.status !== lastStatus) {
-                        // Status changed — reload once to get the full updated view
-                        location.reload();
-                        return;
+                    if (!data) { setTimeout(pollStatus, pollInterval); return; }
+
+                    if (data.status !== lastStatus) {
+                        lastStatus = data.status;
+                        updateDom(data);
+
+                        // For terminal states or major transitions that need full view (TxId, preimage display),
+                        // reload once after a short delay so the user sees the smooth transition first
+                        if (data.isTerminal || data.txId !== lastTxId) {
+                            setTimeout(function () { location.reload(); }, 1500);
+                            return;
+                        }
                     }
-                    // Update the "Updated" timestamp without reloading
+
+                    // Update timestamp even without status change
                     var updatedEl = document.getElementById('swap-updated-at');
                     if (updatedEl && data.updatedAt) updatedEl.textContent = data.updatedAt;
-                    // Schedule next poll
-                    setTimeout(pollStatus, pollInterval);
+
+                    if (!data.isTerminal) setTimeout(pollStatus, pollInterval);
                 })
                 .catch(function () {
-                    // On error, back off and retry
                     setTimeout(pollStatus, pollInterval * 2);
                 });
         }
