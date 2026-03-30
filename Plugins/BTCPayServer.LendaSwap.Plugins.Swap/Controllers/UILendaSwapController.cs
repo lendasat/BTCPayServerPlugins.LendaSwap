@@ -145,7 +145,7 @@ public class UILendaSwapController(
         {
             TempData.SetStatusMessageModel(new StatusMessageModel
             {
-                Message = "Swap created. Please fund the EVM HTLC from your wallet to complete the swap.",
+                Message = "Swap created. Send the tokens to the deposit address shown below.",
                 Severity = StatusMessageModel.StatusSeverity.Success
             });
         }
@@ -225,8 +225,8 @@ public class UILendaSwapController(
         }
 
         var successMsg = swap.SwapType == SwapType.EvmToLightning
-            ? "Swap created. Fund the EVM HTLC to receive BTC on Lightning automatically."
-            : "Swap created. Fund the EVM HTLC to receive BTC onchain.";
+            ? "Swap created. Send the tokens to the deposit address to receive BTC via Lightning."
+            : "Swap created. Send the tokens to the deposit address to receive BTC onchain.";
 
         TempData.SetStatusMessageModel(new StatusMessageModel
         {

@@ -194,14 +194,14 @@
             else
             {
                 <div class="alert alert-warning">
-                    <h5 class="alert-heading mb-2">Action Required: Fund the Swap</h5>
+                    <h5 class="alert-heading mb-2">Action Required: Send Tokens</h5>
                     <p class="mb-2">
-                        Fund this swap using the
+                        Send the tokens to the address below using the
                         <a href="https://lendaswap.com" target="_blank" rel="noopener">LendaSwap app</a>
                         or a compatible wallet.
                     </p>
                     <div class="mb-2">
-                        <strong>Contract Address:</strong><br/>
+                        <strong>Deposit Address:</strong><br/>
                         <div class="d-flex align-items-center gap-2 mt-1">
                             <code class="text-break user-select-all">@(Model.EvmCoordinatorAddress ?? Model.EvmHtlcAddress)</code>
                             <button type="button" class="btn btn-outline-secondary btn-sm clipboard-btn" data-clipboard-text="@(Model.EvmCoordinatorAddress ?? Model.EvmHtlcAddress)" title="Copy">
