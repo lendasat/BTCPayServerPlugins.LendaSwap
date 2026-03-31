@@ -3,6 +3,7 @@ using System;
 using BTCPayServer.LendaSwap.Plugins.Swap.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace BTCPayServer.LendaSwap.Plugins.Swap.Data.Migrations
 {
     [DbContext(typeof(PluginDbContext))]
-    partial class PluginDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260329000000_AddEvmCoordinatorAddress")]
+    partial class AddEvmCoordinatorAddress
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -113,13 +116,6 @@ namespace BTCPayServer.LendaSwap.Plugins.Swap.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
-                    b.Property<int?>("SourceTokenDecimals")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("SourceTokenSymbol")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
@@ -130,10 +126,6 @@ namespace BTCPayServer.LendaSwap.Plugins.Swap.Data.Migrations
 
                     b.Property<int>("SwapType")
                         .HasColumnType("integer");
-
-                    b.Property<string>("TargetAmountRaw")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
 
                     b.Property<string>("TargetChain")
                         .HasMaxLength(32)
@@ -146,13 +138,6 @@ namespace BTCPayServer.LendaSwap.Plugins.Swap.Data.Migrations
                     b.Property<string>("TargetToken")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
-
-                    b.Property<int?>("TargetTokenDecimals")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("TargetTokenSymbol")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
 
                     b.Property<string>("TxId")
                         .HasMaxLength(128)
